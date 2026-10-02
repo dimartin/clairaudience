@@ -13,6 +13,7 @@ import re
 import sys
 from pathlib import Path
 
+import cast as castlib
 import segment
 from llm import chat, load_config, parse_json
 
@@ -41,12 +42,41 @@ def render(segs):
     return "\n".join(f'[Q{s["id"]}] "{s["text"]}"' if s["kind"] == "quote" else s["text"] for s in segs)
 
 
+def _gender(c):
+    """male/female from the name's title or the cast notes; None if unknown or contradictory."""
+    g = castlib._title_gender(c["name"])
+    if g:
+        return g
+    notes = castlib._genders({"notes": c.get("notes", {})})
+    return next(iter(notes)) if len(notes) == 1 else None
+
+
+def _first_name(name):
+    words = [w for w in name.split() if w.lower().rstrip(".") not in castlib.TITLES]
+    return words[0].lower() if len(words) > 1 else None
+
+
 def name_index(cast):
     idx = {}
     for c in cast.values():
         for n in [c["name"]] + c.get("aliases", []) + c.get("epithets", []):
             for key in {n.lower(), n.lower().removeprefix("the "), n.split()[-1].lower()}:
                 idx.setdefault(key, c["id"])
+    # weaker keys, added only where they can't point at the wrong person:
+    # "M. Morrel" / "Madame Danglars" only for a character of that gender ...
+    titles = {"male": ("m.",), "female": ("madame", "mademoiselle")}
+    for c in cast.values():
+        surname = c["name"].split()[-1].lower()
+        for t in titles.get(_gender(c), ()):
+            idx.setdefault(f"{t} {surname}", c["id"])
+    # ... and "Fernand" for Fernand Mondego only if no one else has that first name
+    firsts = {}
+    for c in cast.values():
+        if f := _first_name(c["name"]):
+            firsts.setdefault(f, set()).add(c["id"])
+    for f, ids in firsts.items():
+        if len(ids) == 1:
+            idx.setdefault(f, ids.pop())
     return idx
 
 

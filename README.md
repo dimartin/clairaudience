@@ -93,6 +93,14 @@ TTS models often mangle names. `pronunciations.json` (per book in `out/<book>/`)
 
 It voices every option in the narrator's voice and transcribes each clip with Whisper, so you see what was actually said. It also writes `names/names.wav` so you can judge by ear.
 
+## Tests
+
+The unit tests cover the code that decides identity: cast merging and the dialogue-tag override. They need only `pytest`, and no model is loaded.
+
+```bash
+uv run --with pytest python -m pytest tests
+```
+
 ## Licences
 
 The code is released under the [MIT License](LICENSE). Each model has its own licence:

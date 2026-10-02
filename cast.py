@@ -199,10 +199,14 @@ def merge(cast, n, delta):
         elif not proper_alias(c["name"]) and proper_alias(name):
             c.setdefault("epithets", []).append(c["name"])
             c["name"] = name  # upgrade "the stranger" to a real name once one appears
+            c["aliases"] = [a for a in c["aliases"] if a != name]
         for a in [a for a in [proper_alias(name), *aliases] if a]:
             if a == c["name"] or a in c["aliases"]:
                 continue
-            if _shares_name(a, c) and len(c["aliases"]) < MAX_ALIASES:
+            # a character known only by a description has no name to compare against, so the
+            # model's proper names for it are its identity; that is what lets the upgrade above match
+            nameless = not proper_alias(c["name"])
+            if (nameless or _shares_name(a, c)) and len(c["aliases"]) < MAX_ALIASES:
                 c["aliases"].append(a)     # identity: "Baron Danglars" for Danglars
             elif a not in c.setdefault("epithets", []) and len(c["epithets"]) < MAX_ALIASES:
                 c["epithets"].append(a)    # display and dialogue tags only, never used for matching
