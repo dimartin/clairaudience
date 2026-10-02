@@ -1,0 +1,56 @@
+[
+ {
+  "id": "narrator",
+  "why": "Female narrator: the early cast is almost all men, so a woman's voice keeps narration distinct from dialogue at a glance.",
+  "instruct": "A mature woman in her fifties, warm low alto voice, unhurried and measured storytelling pace, clear diction, quietly dramatic, like a seasoned stage actress reading by firelight.",
+  "text": "On the 24th of February, 1815, the look-out at Notre-Dame de la Garde signalled the three-master, the Pharaon from Smyrna, Trieste, and Naples."
+ },
+ {
+  "id": "edmond_dantes",
+  "why": "Ch1: 'tall, slim young fellow of eighteen or twenty', 'calmness and resolution', 'eyes sparkling with animation'.",
+  "instruct": "A young man of nineteen, bright clear baritone, open and warm, energetic but calm and confident, a sailor from Marseilles with a light southern French lilt, smiling as he speaks.",
+  "text": "I am not proud, but I am happy, and happiness blinds, I think, more than pride."
+ },
+ {
+  "id": "mercedes",
+  "why": "Ch3: 'young and beautiful girl, hair as black as jet'; Catalan; replies 'calmly'; firm and loyal.",
+  "instruct": "A young woman of seventeen, rich warm mezzo-soprano voice, calm and steady, quietly passionate and resolute, with a soft Catalan Spanish accent.",
+  "text": "I love Edmond Dantès, and none but Edmond shall ever be my husband."
+ },
+ {
+  "id": "danglars",
+  "why": "Ch1: 'twenty-five or twenty-six', 'unprepossessing', 'obsequious to his superiors, insolent to his subordinates', 'look gleaming with hate'.",
+  "instruct": "A man in his mid-twenties, thin reedy tenor voice, smooth and ingratiating on the surface with a cold calculating edge underneath, precise clerk-like diction, speaks softly and deliberately.",
+  "text": "Yes; but I added, to help you it would be sufficient that Dantès did not marry her you love; and the marriage may easily be thwarted, methinks, and yet Dantès need not die."
+ },
+ {
+  "id": "fernand",
+  "why": "Ch3: 'tall young man of twenty or two-and-twenty', vexation and uneasiness; Catalan; ch5: 'sinister smile', grips his knife.",
+  "instruct": "A young man of twenty-one, dark husky baritone, intense and brooding, tightly controlled anger with an undercurrent of despair, Catalan Spanish accent.",
+  "text": "I would stab the man, but the woman told me that if any misfortune happened to her betrothed, she would kill herself."
+ },
+ {
+  "id": "caderousse",
+  "why": "Ch2: 'broad Marseillaise accent, and a grin'; tailor; ch4: 'voice more tipsy than ever'.",
+  "instruct": "A stocky middle-aged man, loud rough gravelly voice, broad Marseille working-class accent, boisterous and blustering, slightly slurred and tipsy.",
+  "text": "Kill Dantès! who talks of killing Dantès? I won’t have him killed—I won’t! He’s my friend, and this morning offered to share his money with me, as I shared mine with him."
+ },
+ {
+  "id": "dantes_father",
+  "why": "Ch2: old, 'trembling hand', frail and poor, overcome with joy.",
+  "instruct": "A frail old man in his seventies, thin trembling voice, breathy and soft, gentle and loving, voice breaking with emotion.",
+  "text": "No, no, my dear Edmond—my boy—my son!—no; but I did not expect you; and joy, the surprise of seeing you so suddenly—Ah, I feel as if I were going to die."
+ },
+ {
+  "id": "morrel",
+  "why": "Ch1: shipowner, 'patting Edmond's shoulder kindly'; ch5: 'Private misfortunes must never be allowed to interfere with business'.",
+  "instruct": "A middle-aged man of about fifty, warm full-bodied baritone, kindly and fatherly, a respectable merchant, brisk and businesslike but generous.",
+  "text": "Yes, yes, I know how good a son you are, so now hasten away to see your father. I have a son too, and I should be very wroth with those who detained him from me after a three months’ voyage."
+ },
+ {
+  "id": "waiter",
+  "why": "Ch4: a tavern waiter, one line.",
+  "instruct": "A young working-class man, plain light voice, brisk and matter-of-fact, Marseille accent.",
+  "text": "There’s what you want on that table."
+ }
+]

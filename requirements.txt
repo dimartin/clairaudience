@@ -1,0 +1,8 @@
+# Direct dependencies, pinned to the versions this project was built and tested with
+# (Apple Silicon, Python 3.13, 2026-10-01). requirements.lock pins every transitive package.
+mlx==0.32.3            # Apple's array framework (Metal)
+mlx-audio==0.5.7       # TTS / voice design / Whisper models on MLX
+mlx-lm==0.32.0         # in-process LLM for the text stages ("mlx" backend)
+torch==2.14.1          # needed by mlx-audio's Higgs codec loader (reads .safetensors with framework="pt")
+faster-whisper==1.2.1  # pronunciation check (names.py)
+numpy==2.5.3

@@ -1,0 +1,46 @@
+# clairaudience configuration. Pick a profile with --profile or CLAIRAUDIENCE_PROFILE.
+# Machine-specific settings go in config.local.toml (git-ignored), which is merged on top.
+default_profile = "16gb"
+
+[llm]
+temperature = 0.2
+max_tokens = 8192       # attribution of a dialogue-heavy chapter can need this many
+cast_max_tokens = 4096  # the cast pass answers in under ~2,000; a runaway stops here
+repetition_penalty = 1.1  # in-process (mlx) models only
+timeout_s = 600
+retries = 6
+min_lines = 5          # characters with fewer spoken lines share the extras' voices
+
+# A 16 GB Apple Silicon Mac. Every model runs in-process, one at a time.
+# All models here are Apache-2.0 licensed.
+[profiles."16gb"]
+llm_backend = "mlx"
+llm_model = "mlx-community/Qwen3.5-9B-MLX-4bit"
+design_model = "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16"
+tts = "voxcpm2"
+tts_model = "mlx-community/VoxCPM2-bf16"
+
+# Smallest footprint: a 4B for the text stages (faster, less accurate) and 4-bit Higgs.
+# Higgs TTS 3 weights are research / non-commercial only.
+[profiles."16gb-small"]
+llm_backend = "mlx"
+llm_model = "mlx-community/Qwen3.5-4B-4bit"
+design_model = "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16"
+tts = "higgs"
+tts_model = "Reza2kn/Higgs-Audio-v3-TTS-4bit-MLX"
+
+# 24 GB or more: full-precision Higgs TTS 3 (research / non-commercial licence).
+[profiles."24gb"]
+llm_backend = "mlx"
+llm_model = "mlx-community/Qwen3.5-9B-MLX-4bit"
+design_model = "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16"
+tts = "higgs"
+tts_model = "bosonai/higgs-tts-3-4b"
+
+[publish]
+# rsync destination for the finished book folder (an Audiobookshelf library root, say).
+# Empty means encode only. Override in config.local.toml.
+dest = ""
+format = "m4a"          # m4a (per chapter), mp3 (per chapter), or m4b (one file with chapters)
+bitrate = "96k"
+label = "Full Cast"     # album name is "<Title> (<label>)"

@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.log
+out/
+books/
+names/
+render/
+config.local.toml
+local/
+*.wav
+*.m4a
+.DS_Store
