@@ -206,3 +206,33 @@ def test_chapter_without_quotes_never_calls_the_model(tmp_path, monkeypatch):
     monkeypatch.setattr(attribute, "chat", lambda *a: pytest.fail("LLM called"))
     attribute.attribute_chapter({}, tmp_path, 2, CAST, "", {})
     assert json.loads((tmp_path / "002.script.json").read_text())["segments"][0]["speaker"] == "narrator"
+
+
+# --- read_label: whatever shape the model answers in ---
+
+
+@pytest.mark.parametrize("label, want", [
+    ({"speaker": "danglars", "emotion": "angry"}, ("danglars", "angry")),
+    ({"speaker": {"id": "danglars", "name": "Danglars"}, "emotion": "calm"}, ("danglars", "calm")),
+    ({"speaker": {"name": "fernand"}}, ("fernand", "neutral")),
+    ({"speaker": {"name": "Somebody Else"}}, ("unknown", "neutral")),
+    ({"speaker": ["danglars"]}, ("unknown", "neutral")),
+    ({"speaker": None, "emotion": None}, ("unknown", "neutral")),
+    ({"speaker": "villefort"}, ("unknown", "neutral")),
+    ("edmond_dantes", ("edmond_dantes", "neutral")),
+    (["danglars"], ("unknown", "neutral")),
+    ({}, ("unknown", "neutral")),
+])
+def test_read_label_accepts_any_shape(label, want):
+    assert attribute.read_label(label, CAST) == want
+
+
+def test_a_dict_speaker_no_longer_crashes_the_chapter(tmp_path, monkeypatch):
+    """The Monte Cristo run3 crash: chapter 53's answer nested a speaker as an object."""
+    (tmp_path / "053.txt").write_text("“Who goes there?”\n\n“A friend.”")
+    answer = {"quotes": {"0": {"speaker": {"id": "danglars", "name": "Danglars"}, "emotion": "wary"},
+                         "1": {"speaker": {"oops": 1}}}}
+    monkeypatch.setattr(attribute, "chat", lambda cfg, prompt: json.dumps(answer))
+    attribute.attribute_chapter({}, tmp_path, 53, CAST, "", attribute.name_index(CAST))
+    segs = json.loads((tmp_path / "053.script.json").read_text())["segments"]
+    assert [(s["speaker"], s["emotion"]) for s in segs] == [("danglars", "wary"), ("unknown", "neutral")]

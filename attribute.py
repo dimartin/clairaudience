@@ -127,6 +127,28 @@ def label_batch(cfg, n, segs, lo, hi, cast_text):
     return {}
 
 
+def read_label(a, cast):
+    """(speaker, emotion) from one model label, whatever shape it came back in.
+
+    The prompt asks for {"speaker": "<cast id>", "emotion": "<word>"}, but a small model
+    sometimes nests the speaker as an object ({"id": ..., "name": ...}) or answers with
+    the bare id. A dict speaker once crashed a whole Monte Cristo run at chapter 53 with
+    "unhashable type: 'dict'", 52 chapters in. Anything that isn't a cast id is
+    "unknown", which the dialogue-tag override can still correct.
+    """
+    if isinstance(a, str):
+        a = {"speaker": a}
+    if not isinstance(a, dict):
+        return "unknown", "neutral"
+    sp = a.get("speaker", "unknown")
+    if isinstance(sp, dict):
+        sp = next((v for k in ("id", "speaker", "name") if isinstance(v := sp.get(k), str) and v in cast), "unknown")
+    if not isinstance(sp, str) or sp not in cast:
+        sp = "unknown"
+    emotion = a.get("emotion", "neutral")
+    return sp, emotion if isinstance(emotion, str) and emotion else "neutral"
+
+
 def attribute_chapter(cfg, book, n, cast, cast_text, idx):
     path = book / f"{n:03}.txt"
     segs = segment.segments(path.read_text())
@@ -136,10 +158,7 @@ def attribute_chapter(cfg, book, n, cast, cast_text, idx):
             labels.update(label_batch(cfg, n, segs, lo, hi, cast_text))
     for s in segs:
         if s["kind"] == "quote":
-            a = labels.get(str(s["id"]), {})
-            sp = a.get("speaker", "unknown")
-            s["speaker"] = sp if sp in cast else "unknown"
-            s["emotion"] = a.get("emotion", "neutral")
+            s["speaker"], s["emotion"] = read_label(labels.get(str(s["id"]), {}), cast)
         else:
             s["speaker"], s["emotion"] = "narrator", "neutral"
     fixed = tag_override(segs, idx)
