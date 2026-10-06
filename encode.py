@@ -121,14 +121,33 @@ def publish(book):
         return
     meta, album, dest = book_dir(book)
     remote = f"{target}/{meta['author']}/{album}"
-    # macOS ships openrsync (protocol 29), which has no --mkpath; make the folder first
     if ":" in target:
         host, path = remote.split(":", 1)
-        subprocess.run(["ssh", host, f"mkdir -p {shlex.quote(path)}"], check=True)
+        copy_to_host(dest, host, path)
     else:
         Path(remote).mkdir(parents=True, exist_ok=True)
-    subprocess.run(["rsync", "-a", f"{dest}/", f"{remote}/"], check=True)
+        subprocess.run(["rsync", "-a", f"{dest}/", f"{remote}/"], check=True)
     log.info("published %s to %s", album, target)
+
+
+def copy_to_host(src, host, path):
+    """Copy src's contents into path on host, creating it: tar piped over ssh.
+
+    Not rsync. macOS ships openrsync (protocol 29), which hands the remote path to the
+    remote shell unquoted, so an album folder like "The Count of Monte Cristo (Full
+    Cast, 16GB test)" broke with "syntax error near unexpected token `('". openrsync
+    has no --protect-args, and quoting the path ourselves would double-escape it under
+    GNU rsync 3.2.4+, which escapes remote args itself. With ssh we own the one shell
+    command, so shlex.quote is exactly right whichever rsync is installed.
+    """
+    q = shlex.quote(path)
+    tar = subprocess.Popen(["tar", "-C", str(src), "-cf", "-", "."], stdout=subprocess.PIPE)
+    try:
+        subprocess.run(["ssh", host, f"mkdir -p {q} && tar -C {q} -xf -"], stdin=tar.stdout, check=True)
+    finally:
+        tar.stdout.close()
+    if tar.wait() != 0:
+        raise subprocess.CalledProcessError(tar.returncode, tar.args)
 
 
 if __name__ == "__main__":
