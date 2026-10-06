@@ -73,6 +73,37 @@ def gender_of(c):
     return "female" if "female" in g or g.startswith("f") else "male"
 
 
+ATTEMPTS = 3
+
+
+def design_voice(cfg, meta, c):
+    """The model's voice description for one character, or None after ATTEMPTS bad answers.
+    A small model sometimes returns malformed JSON; attribution retries the same way."""
+    prompt = PROMPT.format(title=meta["title"], name=c["name"],
+                           persona=json.dumps(c.get("persona", c.get("notes", {})), ensure_ascii=False),
+                           evidence="; ".join(c.get("evidence", [])[:12]))
+    for attempt in range(ATTEMPTS):
+        try:
+            v = parse_json(chat(cfg, prompt))
+            if isinstance(v, dict) and isinstance(v.get("instruct"), str) and v["instruct"]:
+                return v
+            raise ValueError("no instruct in the answer")
+        except ValueError as e:
+            log.warning("%s attempt %d: %s", c.get("id", c["name"]), attempt + 1, e)
+    return None
+
+
+def stock_voice(c, pool):
+    """Next stock (EXTRAS) voice of the character's gender, rotating through the pool."""
+    g = gender_of(c)
+    # startswith, not `g in k`: "male" is a substring of "female", which put both female
+    # stock voices in the male pool.
+    options = [k for k in EXTRAS if k.startswith(f"extra_{g}_")]
+    vid = options[pool[g] % len(options)]
+    pool[g] += 1
+    return vid
+
+
 def main(book_dir):
     cfg = load_config()
     book = Path(book_dir)
@@ -94,20 +125,18 @@ def main(book_dir):
             voice_map[cid] = cid
             if cid in voices:
                 continue
-            try:
-                v = parse_json(chat(cfg, PROMPT.format(title=meta["title"], name=c["name"],
-                                    persona=json.dumps(c.get("persona", c.get("notes", {})), ensure_ascii=False),
-                                    evidence="; ".join(c.get("evidence", [])[:12]))))
-            except ValueError as e:
-                log.error("%s: %s", cid, e)
+            v = design_voice(cfg, meta, c)
+            if v is None:
+                # Mapped to its own id with no voice, render falls back to the NARRATOR,
+                # so a major character (Haydée, in Monte Cristo run3) would be read in the
+                # narrator's voice. A stock voice of the right gender is the lesser harm.
+                voice_map[cid] = stock_voice(c, pool)
+                log.error("%s: no voice after %d attempts; using stock voice %s", cid, ATTEMPTS, voice_map[cid])
                 continue
             voices[cid] = {"id": cid, "instruct": v["instruct"], "why": v.get("why", ""), "text": pick_line(lines[cid])}
             log.info("voice %s (%d lines): %s", cid, n, v["instruct"][:100])
         elif cid not in voice_map:
-            g = gender_of(c)
-            options = [k for k in EXTRAS if g in k]
-            voice_map[cid] = options[pool[g] % len(options)]
-            pool[g] += 1
+            voice_map[cid] = stock_voice(c, pool)
     for vid in set(voice_map.values()) & set(EXTRAS):
         voices.setdefault(vid, {"id": vid, "instruct": EXTRAS[vid], "text": "Very well. I shall see to it at once, and you may rely on me."})
     vpath.write_text(json.dumps({"voices": list(voices.values()), "voice_map": voice_map}, indent=1, ensure_ascii=False))
