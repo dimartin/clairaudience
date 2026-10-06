@@ -47,7 +47,7 @@ The models go into the Hugging Face cache (`~/.cache/huggingface/hub`).
 | `mlx-community/Qwen3.5-4B-4bit` | 2.9 GB | 16gb-small |
 | `mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16` | 4.2 GB | all |
 | `mlx-community/VoxCPM2-bf16` | 4.6 GB | 16gb |
-| `Reza2kn/Higgs-Audio-v3-TTS-4bit-MLX` | 2.1 GB | 16gb-small |
+| `mlx-community/chatterbox-turbo-4bit` | 0.4 GB | 16gb-small |
 | `bosonai/higgs-tts-3-4b` | 9.3 GB | 24gb |
 
 `names.py` also downloads Whisper `small.en` (~0.5 GB) the first time it runs.

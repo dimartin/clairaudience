@@ -66,7 +66,7 @@ clairaudience.py run book.epub --from voices             # redo voices and every
 | Profile | Text model | Voice design | Speech | Notes |
 |---|---|---|---|---|
 | `16gb` (default) | Qwen3.5 9B, 4-bit | Qwen3-TTS 1.7B VoiceDesign | VoxCPM2 2B | all Apache-2.0 |
-| `16gb-small` | Qwen3.5 4B, 4-bit | Qwen3-TTS 1.7B VoiceDesign | Higgs TTS 3, 4-bit | fastest. Higgs weights are non-commercial |
+| `16gb-small` | Qwen3.5 4B, 4-bit | Qwen3-TTS 1.7B VoiceDesign | Chatterbox Turbo, 4-bit | fastest: rendered about 4x faster than VoxCPM2 on an M1 Pro |
 | `24gb` | Qwen3.5 9B, 4-bit | Qwen3-TTS 1.7B VoiceDesign | Higgs TTS 3, full precision | Higgs weights are non-commercial |
 
 Put machine-specific settings in `config.local.toml`, which is git-ignored and merged over `config.toml`. Examples are a publish destination, or an LLM you already serve (`llm_backend = "server"` with an OpenAI-compatible `llm_base_url`).
@@ -110,6 +110,7 @@ The code is released under the [MIT License](LICENSE). Each model has its own li
 | Qwen3.5 9B and 4B (text) | Apache-2.0 |
 | Qwen3-TTS VoiceDesign | Apache-2.0 |
 | VoxCPM2 | Apache-2.0 |
+| Chatterbox Turbo (Resemble AI; 4-bit MLX build) | MIT (original), Apache-2.0 (MLX build) |
 | Higgs TTS 3 (Boson AI) | research and non-commercial only |
 
 Respect the rights to the books you convert. The examples use *The Count of Monte Cristo* (Project Gutenberg #1184), which is in the public domain.

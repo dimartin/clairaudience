@@ -20,6 +20,7 @@ import numpy as np
 
 from llm import load_config
 
+from mlx_audio.audio_io import read as audio_read
 from mlx_audio.audio_io import write as audio_write
 
 log = logging.getLogger("render")
@@ -90,12 +91,49 @@ def design(book):
     _free(model)
 
 
+#: Chatterbox refuses a reference clip under 5 s ("Audio prompt must be longer than 5
+#: seconds!"); a shorter one is looped to this length.
+CHATTERBOX_MIN_REF = 6.0
+
+
+def collect(gen):
+    """Every segment a generate() call yields, joined. Some models (Chatterbox) split
+    long text themselves and yield one result per sentence; taking only the first
+    would silently drop the rest of the line."""
+    parts, sr = [], 24000
+    for r in gen:
+        parts.append(np.asarray(r.audio, dtype=np.float32).reshape(-1))
+        sr = r.sample_rate
+    if not parts:
+        raise RuntimeError("the TTS model returned no audio")
+    return np.concatenate(parts), sr
+
+
+def long_enough(ref, cache_dir, min_s=CHATTERBOX_MIN_REF):
+    """ref, or a copy looped to min_s seconds when it's shorter. Cached in cache_dir, so a
+    voice reference is only ever looped once per book."""
+    ref = Path(ref)
+    out = Path(cache_dir) / ref.name
+    if out.exists():
+        return out
+    audio, sr = audio_read(str(ref), dtype="float32")
+    if len(audio) >= min_s * sr:
+        return ref
+    reps = int(np.ceil(min_s * sr / max(len(audio), 1)))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    audio_write(str(out), np.tile(audio, reps)[: int(min_s * sr)], sr)
+    log.info("looped %s (%.1fs) to %.0fs for chatterbox", ref.name, len(audio) / sr, min_s)
+    return out
+
+
 class TTS:
-    """One cloning TTS model: Higgs (pre-encoded reference codes) or VoxCPM2 (reference wav)."""
+    """One cloning TTS model: Higgs (pre-encoded reference codes), Chatterbox or VoxCPM2
+    (reference wav)."""
 
     def __init__(self, cfg, voices, refdir):
         from mlx_audio.tts.utils import load_model
         self.kind, self.voices, self.refdir = cfg["tts"], voices, refdir
+        self._refs = {}
         if self.kind == "higgs":
             # mlx-audio 0.5.7 drops its own higgs_multimodal_qwen3 mapping when the repo name
             # has no matching part (utils.py:293); hint it directly.
@@ -106,11 +144,15 @@ class TTS:
 
     def speak(self, text, vid):
         if self.kind == "higgs":
-            r = next(self.model.generate(text=text, ref_audio_codes=self.codes[vid], ref_text=self.voices[vid]["text"],
-                                         temperature=1.0, max_new_tokens=2048))
-        else:
-            r = next(self.model.generate(text=text, ref_audio=str(self.refdir / f"{vid}.wav")))
-        return r.audio, r.sample_rate
+            return collect(self.model.generate(text=text, ref_audio_codes=self.codes[vid],
+                                               ref_text=self.voices[vid]["text"], temperature=1.0,
+                                               max_new_tokens=2048))
+        if vid not in self._refs:
+            ref = self.refdir / f"{vid}.wav"
+            if self.kind == "chatterbox":
+                ref = long_enough(ref, self.refdir.parent / "refs-looped")
+            self._refs[vid] = str(ref)
+        return collect(self.model.generate(text=text, ref_audio=self._refs[vid]))
 
 
 def split(text):
