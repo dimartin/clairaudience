@@ -54,3 +54,25 @@ def test_a_character_with_no_designed_voice_gets_a_stock_voice_not_the_narrator(
     assert out["voice_map"]["haydee"] == "extra_female_1"
     assert "extra_female_1" in ids  # the stock voice is defined, so render will find it
     assert out["voice_map"]["ali"] == "ali" and "ali" in ids
+
+
+BROKEN_WHY = """{
+  "instruct": "A warm youthful baritone with a light \\"Marseilles\\" colour.",
+  "why": “fine, tall, slim young fellow”
+}"""
+
+
+def test_salvage_keeps_instruct_when_why_breaks_the_json():
+    assert voices.salvage_instruct(BROKEN_WHY) == 'A warm youthful baritone with a light "Marseilles" colour.'
+
+
+def test_salvage_gives_up_without_an_instruct():
+    assert voices.salvage_instruct('{"why": "x"') is None
+    assert voices.salvage_instruct(None) is None
+
+
+def test_design_voice_uses_the_salvaged_instruct_on_the_first_try(monkeypatch):
+    calls = []
+    monkeypatch.setattr(voices, "chat", lambda cfg, prompt: calls.append(1) or BROKEN_WHY)
+    v = voices.design_voice({}, META, HAYDEE)
+    assert v["instruct"].startswith("A warm youthful baritone") and len(calls) == 1

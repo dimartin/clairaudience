@@ -11,6 +11,7 @@ Writes out/<book>/voices.json: {"voices": [...], "voice_map": {speaker_id: voice
 
 import json
 import logging
+import re
 import sys
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -83,14 +84,37 @@ def design_voice(cfg, meta, c):
                            persona=json.dumps(c.get("persona", c.get("notes", {})), ensure_ascii=False),
                            evidence="; ".join(c.get("evidence", [])[:12]))
     for attempt in range(ATTEMPTS):
+        raw = chat(cfg, prompt)
         try:
-            v = parse_json(chat(cfg, prompt))
+            v = parse_json(raw)
             if isinstance(v, dict) and isinstance(v.get("instruct"), str) and v["instruct"]:
                 return v
             raise ValueError("no instruct in the answer")
         except ValueError as e:
+            salvaged = salvage_instruct(raw)
+            if salvaged:
+                log.warning("%s: bad JSON (%s); kept the instruct line", c.get("id", c["name"]), e)
+                return {"instruct": salvaged, "why": ""}
             log.warning("%s attempt %d: %s", c.get("id", c["name"]), attempt + 1, e)
     return None
+
+
+#: "instruct" comes first and is one JSON string; the model's trouble is the "why" that
+#: follows. On the Monte Cristo run 9 of 10 failed designs broke at line 3 column 11,
+#: the start of "why", where it quotes the book and sometimes produces invalid JSON.
+_INSTRUCT = re.compile(r'"instruct"\s*:\s*"((?:[^"\\]|\\.)*)"', re.S)
+
+
+def salvage_instruct(raw):
+    """The "instruct" string from an answer whose JSON is broken elsewhere, or None."""
+    m = _INSTRUCT.search(raw or "")
+    if not m:
+        return None
+    try:
+        text = json.loads(f'"{m.group(1)}"')
+    except ValueError:
+        return None
+    return text.strip() or None
 
 
 def stock_voice(c, pool):
