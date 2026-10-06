@@ -1,6 +1,7 @@
 """encode.publish / copy_to_host: getting an album onto the Audiobookshelf host."""
 
 import shlex
+import shutil
 import subprocess
 
 import pytest
@@ -57,3 +58,22 @@ def test_copy_round_trips_through_a_real_shell(tmp_path, monkeypatch):
     monkeypatch.setattr(encode.subprocess, "run", run)
     encode.copy_to_host(src, "h", str(dest))
     assert (dest / "a b (c).m4a").read_bytes() == b"audio"
+
+
+@pytest.mark.skipif(not shutil.which("xattr"), reason="macOS only: needs xattr")
+def test_no_appledouble_sidecars_in_the_stream(tmp_path, monkeypatch):
+    """macOS tar adds a "._<name>" entry for a file with extended attributes; GNU tar on
+    the host then writes it out as a file, which Audiobookshelf lists as a track. The
+    macOS tar on this side restores such entries as xattrs, so only the stream shows it."""
+    (tmp_path / "004.m4a").write_bytes(b"audio")
+    subprocess.run(["xattr", "-w", "com.example.probe", "1", str(tmp_path / "004.m4a")], check=True)
+    seen = {}
+
+    def run(argv, **kw):
+        seen["stream"] = kw["stdin"].read()
+        return subprocess.CompletedProcess(argv, 0)
+
+    monkeypatch.setattr(encode.subprocess, "run", run)
+    encode.copy_to_host(tmp_path, "h", "/x")
+    assert b"004.m4a" in seen["stream"]
+    assert b"._004.m4a" not in seen["stream"]

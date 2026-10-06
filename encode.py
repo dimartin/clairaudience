@@ -14,6 +14,7 @@ publish rsyncs that folder to [publish].dest (an Audiobookshelf library root, sa
 
 import json
 import logging
+import os
 import re
 import shlex
 import subprocess
@@ -141,7 +142,10 @@ def copy_to_host(src, host, path):
     command, so shlex.quote is exactly right whichever rsync is installed.
     """
     q = shlex.quote(path)
-    tar = subprocess.Popen(["tar", "-C", str(src), "-cf", "-", "."], stdout=subprocess.PIPE)
+    # COPYFILE_DISABLE stops macOS tar adding AppleDouble "._<name>" files, which the
+    # Audiobookshelf library would list as tracks. Other tars ignore it.
+    env = {**os.environ, "COPYFILE_DISABLE": "1"}
+    tar = subprocess.Popen(["tar", "-C", str(src), "-cf", "-", "."], stdout=subprocess.PIPE, env=env)
     try:
         subprocess.run(["ssh", host, f"mkdir -p {q} && tar -C {q} -xf -"], stdin=tar.stdout, check=True)
     finally:
