@@ -29,3 +29,11 @@ def test_long_enough_loops_a_short_ref_and_keeps_a_long_one(tmp_path):
     audio, got_sr = render.audio_read(str(out), dtype="float32")
     assert out.parent == cache and abs(len(audio) / got_sr - render.CHATTERBOX_MIN_REF) < 0.05
     assert render.long_enough(long_, cache) == long_
+
+
+def test_speakable_respells_then_normalises():
+    lexicon = [(render.re.compile(r"\bCaderousse\b"), "Cad-roose")]
+    words = {"known": {"the"}, "title_numerals": {"I", "II"}}
+    assert render.speakable("Caderousse and the CIA", lexicon, words) == "Cad-roose and the C. I. A."
+    assert render.speakable("II. Father", lexicon, words, opens_paragraph=True) == "two. Father"
+    assert render.speakable("the CIA", lexicon) == "the CIA"   # no words.json: respellings only

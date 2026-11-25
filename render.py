@@ -18,6 +18,7 @@ from pathlib import Path
 
 import numpy as np
 
+import normalise
 from llm import load_config
 
 from mlx_audio.audio_io import read as audio_read
@@ -177,13 +178,22 @@ def load_lexicon(path=Path("pronunciations.json")):
     return [(re.compile(rf"\b{re.escape(k)}\b"), v) for k, v in sorted(lex.items(), key=lambda kv: -len(kv[0]))]
 
 
-def speakable(text, lexicon):
+def speakable(text, lexicon, words=None, opens_paragraph=False):
+    """What the TTS reads: respellings first, then numerals and caps (normalise.py)."""
     for pat, rep in lexicon:
         text = pat.sub(rep, text)
-    return text
+    return normalise.normalise(text, words, opens_paragraph)
 
 
-def render_chapter(tts, script, voice_map, lexicon, out_path):
+def load_words(book):
+    """The book's own lexicon (words.json from extract); built from the chapters if missing."""
+    texts = [p.read_text() for p in sorted(book.glob("[0-9][0-9][0-9].txt"))]
+    index = book / "index.json"
+    headings = [c["title"] for c in json.loads(index.read_text())] if index.exists() else []
+    return normalise.load(book / "words.json", texts, headings)
+
+
+def render_chapter(tts, script, voice_map, lexicon, out_path, words=None):
     pieces, sr, prev_para, prev_vid = [], 24000, None, None
     t_start, audio_secs = time.time(), 0.0
     segs = script["segments"]
@@ -191,8 +201,9 @@ def render_chapter(tts, script, voice_map, lexicon, out_path):
         vid = voice_map.get(s["speaker"], "narrator") if s["kind"] == "quote" else "narrator"
         if vid not in tts.voices:
             vid = "narrator"
-        for chunk in split(s["text"]):
-            audio, sr = tts.speak(speakable(chunk, lexicon), vid)
+        para_start = s["kind"] == "narration" and (i == 0 or segs[i - 1]["para"] != s["para"])
+        for j, chunk in enumerate(split(s["text"])):
+            audio, sr = tts.speak(speakable(chunk, lexicon, words, para_start and j == 0), vid)
             if prev_para is not None:
                 gap = PAUSE_NEW_PARA if s["para"] != prev_para else PAUSE_SAME_PARA
                 if vid != prev_vid:
@@ -215,6 +226,7 @@ def render(book, chapters):
     cfg = load_config()
     voices, voice_map = load_voices(book)
     lexicon = load_lexicon(book / "pronunciations.json") or load_lexicon()
+    words = load_words(book)
     outdir = book / "audio"
     outdir.mkdir(exist_ok=True)
     scripts = sorted(book.glob("[0-9][0-9][0-9].script.json"))
@@ -226,7 +238,7 @@ def render(book, chapters):
         return
     tts = TTS(cfg, voices, book / "refs")
     for p in todo:
-        render_chapter(tts, json.loads(p.read_text()), voice_map, lexicon, outdir / f"{p.name[:3]}.wav")
+        render_chapter(tts, json.loads(p.read_text()), voice_map, lexicon, outdir / f"{p.name[:3]}.wav", words)
     _free(tts.model)
 
 
