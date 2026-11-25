@@ -49,7 +49,7 @@ def test_tag_names_a_cast_member_and_overrides_the_model():
     segs = script("“Good day,” said Danglars.", speaker="fernand")
     assert attribute.tag_override(segs, attribute.name_index(CAST)) == 1
     assert segs[0]["speaker"] == "danglars"
-    assert segs[0]["tag_override"] is True
+    assert segs[0]["source"] == "tag"
 
 
 @pytest.mark.parametrize("tag, who", [
@@ -83,10 +83,17 @@ def test_first_name_never_displaces_someone_elses_surname():
     assert attribute.name_index(cast)["danglars"] == "b"
 
 
-def test_matching_speaker_is_not_counted_as_a_fix():
+def test_matching_speaker_is_not_counted_as_a_fix_but_is_a_tag():
     segs = script("“Good day,” said Danglars.", speaker="danglars")
     assert attribute.tag_override(segs, attribute.name_index(CAST)) == 0
-    assert "tag_override" not in segs[0]
+    assert segs[0]["source"] == "tag"
+
+
+def test_tag_never_changes_a_hand_edit():
+    segs = script("“Good day,” said Danglars.", speaker="fernand")
+    segs[0]["source"] = "user"
+    assert attribute.tag_override(segs, attribute.name_index(CAST)) == 0
+    assert (segs[0]["speaker"], segs[0]["source"]) == ("fernand", "user")
 
 
 def test_tag_in_the_next_paragraph_does_not_apply():
@@ -191,12 +198,14 @@ def test_attribute_chapter_writes_the_script(tmp_path, monkeypatch):
 
     segs = json.loads((tmp_path / "001.script.json").read_text())["segments"]
     by_id = {s["id"]: s for s in segs}
-    assert by_id[0]["speaker"] == "danglars" and by_id[0]["tag_override"]
+    assert (by_id[0]["speaker"], by_id[0]["source"]) == ("danglars", "tag")
     assert by_id[0]["emotion"] == "angry"
     assert (by_id[2]["speaker"], by_id[2]["emotion"]) == ("edmond_dantes", "fearful")
     assert by_id[3]["speaker"] == "unknown"
     assert (by_id[5]["speaker"], by_id[5]["emotion"]) == ("unknown", "neutral")
-    assert all(s["speaker"] == "narrator" for s in segs if s["kind"] == "narration")
+    assert by_id[2]["source"] == "llm"
+    assert by_id[3]["source"] == by_id[5]["source"] == "unknown"
+    assert all(s["speaker"] == "narrator" and "source" not in s for s in segs if s["kind"] == "narration")
     # the book text is never changed
     assert [s["text"] for s in segs] == [s["text"] for s in segment.segments((tmp_path / "001.txt").read_text())]
 
@@ -236,3 +245,39 @@ def test_a_dict_speaker_no_longer_crashes_the_chapter(tmp_path, monkeypatch):
     attribute.attribute_chapter({}, tmp_path, 53, CAST, "", attribute.name_index(CAST))
     segs = json.loads((tmp_path / "053.script.json").read_text())["segments"]
     assert [(s["speaker"], s["emotion"]) for s in segs] == [("danglars", "wary"), ("unknown", "neutral")]
+
+
+# --- source: hand edits survive a rerun ---
+
+
+def test_rerun_keeps_hand_edited_lines(tmp_path, monkeypatch, caplog):
+    (tmp_path / "001.txt").write_text("“Good day,” said Danglars.\n\n“Who goes there?”\n\n“A friend.”")
+    answer = {"quotes": {"0": {"speaker": "danglars"}, "2": {"speaker": "danglars"}, "3": {"speaker": "danglars"}}}
+    monkeypatch.setattr(attribute, "chat", lambda cfg, prompt: json.dumps(answer))
+    attribute.attribute_chapter({}, tmp_path, 1, CAST, "", attribute.name_index(CAST))
+
+    path = tmp_path / "001.script.json"
+    data = json.loads(path.read_text())
+    by_id = {s["id"]: s for s in data["segments"]}
+    by_id[0].update(speaker="fernand", source="user")        # against the tag: the person wins
+    by_id[2].update(speaker="edmond_dantes", emotion="fearful", source="user")
+    by_id[3].update(speaker="fernand")                      # edited without marking it: not kept
+    path.write_text(json.dumps(data))
+
+    with caplog.at_level("INFO", logger="attribute"):
+        attribute.attribute_chapter({}, tmp_path, 1, CAST, "", attribute.name_index(CAST))
+    by_id = {s["id"]: s for s in json.loads(path.read_text())["segments"]}
+    assert (by_id[0]["speaker"], by_id[0]["source"]) == ("fernand", "user")
+    assert (by_id[2]["speaker"], by_id[2]["emotion"], by_id[2]["source"]) == ("edmond_dantes", "fearful", "user")
+    assert (by_id[3]["speaker"], by_id[3]["source"]) == ("danglars", "llm")
+    assert "tag 0, tag-resolved 0, llm 1, unknown 0, user 2; llm share 33%" in caplog.text
+
+
+def test_a_hand_edit_whose_text_changed_is_dropped(tmp_path, monkeypatch):
+    (tmp_path / "001.txt").write_text("“Who goes there?”")
+    (tmp_path / "001.script.json").write_text(json.dumps({"segments": [
+        {"kind": "quote", "id": 0, "text": "Who went there?", "speaker": "fernand", "source": "user"}]}))
+    monkeypatch.setattr(attribute, "chat", lambda cfg, prompt: json.dumps({"quotes": {"0": {"speaker": "danglars"}}}))
+    attribute.attribute_chapter({}, tmp_path, 1, CAST, "", attribute.name_index(CAST))
+    seg = json.loads((tmp_path / "001.script.json").read_text())["segments"][0]
+    assert (seg["speaker"], seg["source"]) == ("danglars", "llm")

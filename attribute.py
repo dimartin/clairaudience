@@ -3,6 +3,13 @@
 The LLM labels quotes; then a deterministic pass overrides any quote whose dialogue tag
 ("said Danglars", "resumed the Catalan") names a cast member. The book text is unchanged.
 
+Every quote records how its speaker was decided, in "source" (narration has none):
+  tag           the dialogue tag names a cast member
+  tag-resolved  a nameless tag ("said she") resolved by two agreeing reads
+  llm           the model's label, with no override
+  unknown       the model gave no usable speaker (none, or a name not in the cast)
+  user          edited by hand; a rerun keeps these lines as they are
+
 Usage: python attribute.py out/<book> [chapter ...]
 Writes out/<book>/NNN.script.json per chapter.
 """
@@ -80,21 +87,28 @@ def name_index(cast):
     return idx
 
 
+SOURCES = ("tag", "tag-resolved", "llm", "unknown", "user")
+
+
 def tag_override(segs, idx):
-    """A quote immediately followed (same paragraph) by 'said <name>' belongs to <name>."""
+    """A quote immediately followed (same paragraph) by 'said <name>' belongs to <name>.
+    The quote's source becomes "tag" even when the model already agreed; a hand-edited
+    ("user") quote is never changed. Returns how many speakers it changed."""
     fixed = 0
     for i, s in enumerate(segs):
         if s["kind"] != "narration" or i == 0:
             continue
         m = TAG.match(s["text"])
         prev = segs[i - 1]
-        if not m or prev["kind"] != "quote" or prev["para"] != s["para"]:
+        if not m or prev["kind"] != "quote" or prev["para"] != s["para"] or prev.get("source") == "user":
             continue
         who = idx.get(m.group(1).lower()) or idx.get(m.group(1).lower().removeprefix("the "))
-        if who and prev["speaker"] != who:
+        if not who:
+            continue
+        if prev["speaker"] != who:
             log.info("tag override Q%d: %s -> %s (%r)", prev["id"], prev["speaker"], who, m.group(0))
-            prev["speaker"], prev["tag_override"] = who, True
             fixed += 1
+        prev["speaker"], prev["source"] = who, "tag"
     return fixed
 
 
@@ -149,24 +163,52 @@ def read_label(a, cast):
     return sp, emotion if isinstance(emotion, str) and emotion else "neutral"
 
 
+def user_lines(path, segs):
+    """Hand-edited quotes ("source": "user") from an existing script, by id, kept only
+    where the quote text is still the same."""
+    if not path.exists():
+        return {}
+    text = {s["id"]: s["text"] for s in segs}
+    kept = {}
+    for s in json.loads(path.read_text())["segments"]:
+        if s["kind"] != "quote" or s.get("source") != "user":
+            continue
+        if text.get(s["id"]) == s["text"]:
+            kept[s["id"]] = s
+        else:
+            log.warning("%s: hand edit Q%d no longer matches the text; dropped", path.name, s["id"])
+    return kept
+
+
+def source_counts(quotes):
+    return {src: sum(q.get("source") == src for q in quotes) for src in SOURCES}
+
+
 def attribute_chapter(cfg, book, n, cast, cast_text, idx):
     path = book / f"{n:03}.txt"
+    out_path = book / f"{n:03}.script.json"
     segs = segment.segments(path.read_text())
     labels = {}
     if any(s["kind"] == "quote" for s in segs):
         for lo, hi in batches(segs):
             labels.update(label_batch(cfg, n, segs, lo, hi, cast_text))
+    edited = user_lines(out_path, segs)
     for s in segs:
-        if s["kind"] == "quote":
+        if s["id"] in edited:
+            u = edited[s["id"]]
+            s["speaker"], s["emotion"], s["source"] = u["speaker"], u.get("emotion", "neutral"), "user"
+        elif s["kind"] == "quote":
             s["speaker"], s["emotion"] = read_label(labels.get(str(s["id"]), {}), cast)
+            s["source"] = "unknown" if s["speaker"] == "unknown" else "llm"
         else:
             s["speaker"], s["emotion"] = "narrator", "neutral"
     fixed = tag_override(segs, idx)
     quotes = [s for s in segs if s["kind"] == "quote"]
-    unknown = sum(1 for s in quotes if s["speaker"] == "unknown")
     out = {"chapter": n, "segments": segs}
-    (book / f"{n:03}.script.json").write_text(json.dumps(out, indent=1, ensure_ascii=False))
-    log.info("chapter %d: %d quotes, %d tag overrides, %d unknown", n, len(quotes), fixed, unknown)
+    out_path.write_text(json.dumps(out, indent=1, ensure_ascii=False))
+    counts = source_counts(quotes)
+    log.info("chapter %d: %d quotes, %d tag overrides; by source: %s; llm share %.0f%%", n, len(quotes), fixed,
+             ", ".join(f"{k} {v}" for k, v in counts.items()), 100 * counts["llm"] / max(len(quotes), 1))
 
 
 def main(book_dir, *chapters):

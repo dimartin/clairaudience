@@ -81,7 +81,21 @@ Measured on Chapter 4 of *The Count of Monte Cristo* (121 quoted lines, checked 
 | Qwen3.5 9B, 4-bit, in-process (`16gb`) | 117/121 (97%) | 72 s |
 | Qwen3.5 4B, 4-bit (`16gb-small`) | 112/121 (93%) | 29 s |
 
-Score your own setup with `eval.py <profile>`.
+Score your own setup with `eval.py <profile>`. It reports the overall figure and the accuracy for each source (below).
+
+### Where each speaker came from
+
+Every quote in `NNN.script.json` has a `source` that says how its speaker was decided:
+
+| `source` | Meaning |
+|---|---|
+| `tag` | a dialogue tag names a cast member ("said Danglars") |
+| `tag-resolved` | a nameless tag ("said she") resolved by two agreeing reads |
+| `llm` | the model's label, with nothing to confirm it |
+| `unknown` | the model gave no usable speaker (none, or a name not in the cast) |
+| `user` | edited by hand |
+
+Narration has no `source`. The attribute log prints the counts per chapter and the share of `llm` lines; those are the lines to check first. When you correct a speaker by hand, set its `source` to `user`: a rerun of `attribute` keeps those lines as long as the quote's text is unchanged.
 
 ## Pronunciation
 
