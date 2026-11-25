@@ -10,6 +10,7 @@ Usage: python eval.py <profile> [<profile> ...]   (each profile runs in its own 
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -41,6 +42,15 @@ def score(gold_segs, got_segs):
             "by_source": by_source, "wrong": wrong}
 
 
+# llm.py's two timing lines: "llm 3.2s prompt=..." and "loaded <model> in 4.1s". Anchored on the
+# message start so attribute.py's "chapter N: ...; llm share P%" summary is not taken for one.
+TIMING = re.compile(r" INFO (llm \d[\d.]*s |loaded \S+ in \d[\d.]*s$)")
+
+
+def timing_lines(text):
+    return [l for l in text.splitlines() if TIMING.search(l)]
+
+
 def run_one(profile):
     book = HERE / "out" / f"eval-{profile}"
     shutil.rmtree(book, ignore_errors=True)
@@ -55,7 +65,7 @@ def run_one(profile):
                        stdout=f, stderr=subprocess.STDOUT, check=True)
     result = score(json.loads(GOLD.read_text())["segments"],
                    json.loads((book / "004.script.json").read_text())["segments"])
-    secs = [l for l in log.read_text().splitlines() if " llm " in l or "loaded" in l]
+    secs = timing_lines(log.read_text())
     return {"profile": profile, **result, "timing": secs}
 
 
