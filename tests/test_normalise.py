@@ -7,7 +7,7 @@ import pytest
 import normalise as N
 
 # a slice of what Monte Cristo writes in lowercase somewhere (it has all of these)
-KNOWN = {"volume", "one", "myself", "chapter", "secret", "top", "files", "the", "louis"}
+KNOWN = {"volume", "one", "myself", "chapter", "secret", "top", "files", "the", "louis", "no", "ok"}
 WORDS = {"known": KNOWN, "title_numerals": {"I", "II", "III", "XIII", "XIV", "XV"}}
 
 
@@ -50,6 +50,11 @@ def test_known_words_are_the_ones_written_in_lowercase():
     ("VOLUME ONE", "VOLUME ONE"),
     ("I will do it MYSELF!", "I will do it MYSELF!"),
     # acronyms
+    # a short caps word the book writes in lowercase stays a word, outside a caps passage too
+    ("He said NO.", "He said NO."),
+    ("It was OK, then.", "It was OK, then."),
+    ("I", "I"),
+    # "cia" is not in the known words: an acronym
     ("the CIA files", "the C. I. A. files"),
     ("He joined the CIA.", "He joined the C. I. A."),
     ("HTML pages", "H. T. M. L. pages"),

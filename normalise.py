@@ -12,9 +12,9 @@ Rules:
   opens a paragraph with a title numeral ("XIV. The Return", or "XIV" alone) is read as
   the number.
   Any other roman numeral stays as written ("Louis XIV", "Charles II.").
-  An all-caps token is spelled out ("CIA" -> "C. I. A.") when it is short and outside an
-  all-caps passage, or when the book never writes it in lowercase and it can't be said
-  as a word ("HTML"). A caps word in a heading or a shouted line stays a word ("SECRET").
+  An all-caps token the book also writes in lowercase is a word ("NO", "SECRET"), whatever
+  its length or context. Any other is spelled out ("CIA" -> "C. I. A.") when it is short
+  and outside an all-caps passage, or when it can't be said as a word ("HTML").
 """
 
 import json
@@ -127,9 +127,9 @@ def spell_out(text, known):
         tok = m.group(1)
         if roman_value(tok):
             return tok
-        long_ = len(tok) > SHORT
-        if long_ and tok.lower() in known:
+        if tok.lower() in known:   # the book writes it in lowercase: a word, whatever its length
             return tok
+        long_ = len(tok) > SHORT
         if pronounceable(tok) and (long_ or _in_caps_passage(text, m.start(), m.end(), known)):
             return tok
         spelled = ". ".join(tok)
