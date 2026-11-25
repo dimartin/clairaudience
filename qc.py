@@ -12,7 +12,8 @@ freed, then Whisper scores the takes. For each clip:
 
 A clip fails a metric when it is over max(floor, k x the voice's median for that metric),
 so the bar is relative to the book. Flagged lines are retaken with new seeds (several takes
-for short lines) and the best take, the current one included, is kept. When every take
+for short lines) with the speech model recorded in lines/NNN/index.json, and the best
+take, the current one included, is kept. When every take
 transcribes the same wrong way, the recognizer is blamed, not the TTS, and a misheard name
 is listed as a pronunciations.json candidate.
 
@@ -98,16 +99,26 @@ def word_check(ref, hyp, min_letters=5):
     return {"cer": round(cer(ref, hyp), 3), "wrong_run": wrong_run, "extra": extra, "missing": missing}
 
 
+def fold_words(words):
+    """Whisper's [(word, start, end)] folded as word_check folds the transcript, so its
+    positions line up: 'Monte-Cristo' becomes two words with the same times, and a word
+    that folds to nothing ('—') is dropped."""
+    return [(f, s, e) for w, s, e in words for f in fold(w).split()]
+
+
 def gap_window(words, j, duration, pad):
-    """(start, end) seconds around hyp position j, from Whisper's word times [(w, s, e)]."""
+    """(start, end) seconds around folded hyp position j, from Whisper's word times
+    [(w, s, e)]."""
+    words = fold_words(words)
     start = words[j - 1][2] if 0 < j <= len(words) else 0.0
     end = words[j][1] if j < len(words) else duration
     return max(0.0, start - pad), min(duration, end + pad)
 
 
 def confirmed_missing(missing, heard_again):
-    """Missing words the second listen didn't hear either. heard_again: word -> transcript."""
-    return [w for w, _ in missing if w not in fold(heard_again.get(w, "")).split()]
+    """Missing words the second listen didn't hear either. heard_again: one transcript per
+    entry of missing, so a word missing twice is listened to at both gaps."""
+    return [w for (w, _), h in zip(missing, heard_again, strict=True) if w not in fold(h).split()]
 
 
 # --- thresholds, flags, takes: pure ---
@@ -161,9 +172,10 @@ def words_ok(metrics, thr):
 
 def best_take(takes, thr, short):
     """The take to keep (index into takes). A short line keeps the take closest to the
-    reference pitch among those whose words pass; otherwise the lowest badness."""
+    reference pitch among those that pass every check; otherwise, or when none passes,
+    the lowest badness."""
     if short:
-        ok = [i for i, t in enumerate(takes) if words_ok(t["metrics"], thr) and t["metrics"].get("pitch") is not None]
+        ok = [i for i, t in enumerate(takes) if not reasons(t["metrics"], thr) and t["metrics"].get("pitch") is not None]
         if ok:
             return min(ok, key=lambda i: takes[i]["metrics"]["pitch"])
     return min(range(len(takes)), key=lambda i: badness(takes[i]["metrics"], thr))
@@ -251,10 +263,10 @@ def score_clip(asr, path, spoken, ref_f0, cfg):
     heard, words = asr.transcribe(audio, sr)
     m = word_check(spoken, heard, cfg["min_missing_letters"])
     if m["missing"]:
-        again = {}
+        again = []
         for w, j in m["missing"]:
             s, e = gap_window(words, j, len(audio) / sr, cfg["window_pad"])
-            again[w] = asr.transcribe(audio[int(s * sr):int(e * sr)], sr)[0]
+            again.append(asr.transcribe(audio[int(s * sr):int(e * sr)], sr)[0])
         m["missing"] = confirmed_missing(m["missing"], again)
     else:
         m["missing"] = []
@@ -283,23 +295,43 @@ def take_length(t, voice_rates):
     t["metrics"]["length"] = round(abs(math.log(rate / med)), 3) if rate and med else None
 
 
+def tts_settings(idx, load=load_config):
+    """The speech model a chapter was rendered with, from its lines/NNN/index.json, so a
+    retake never mixes models. An index from before render recorded it falls back to
+    CLAIRAUDIENCE_PROFILE or the default profile, with a warning."""
+    if idx.get("tts") and idx.get("tts_model"):
+        return {"profile": idx.get("profile"), "tts": idx["tts"], "tts_model": idx["tts_model"]}
+    cfg = load()
+    log.warning("lines/%03d/index.json does not record the speech model; retaking with profile %s (%s). "
+                "Render the chapter again if it was rendered with another profile.",
+                idx["chapter"], cfg["profile"], cfg["tts_model"])
+    return {k: cfg.get(k) for k in ("profile", "tts", "tts_model")}
+
+
 def retake(book, flagged, cfg):
-    """Render new takes of each flagged clip with new seeds. Returns the take items."""
+    """Render new takes of each flagged clip with new seeds, with the speech model in the
+    clip's "render" settings (one model loaded at a time). Returns the take items."""
     import render
     from mlx_audio.audio_io import write as audio_write
     voices, _ = render.load_voices(book)
-    tts = render.TTS(load_config(), voices, book / "refs")
-    takes = []
+    groups = {}
     for c in flagged:
-        count = cfg["short_takes"] if len(c["spoken"]) <= cfg["short_chars"] else cfg["retakes"]
-        for k in range(1, count + 1):
-            seed = render.seed_for(c["seg"], c["n"], k)
-            audio, sr = tts.speak(c["spoken"], c["voice"], seed)
-            path = c["path"].with_name(f'{c["seg"]}-{c["n"]}.take{k}.wav')
-            audio_write(str(path), render.tidy(audio, sr), sr)
-            takes.append({"clip": c["file"], "take": k, "seed": seed, "path": path, "spoken": c["spoken"],
-                          "voice": c["voice"]})
-    render._free(tts.model)
+        groups.setdefault((c["render"]["tts"], c["render"]["tts_model"]), []).append(c)
+    takes = []
+    for clips in groups.values():
+        tts = render.TTS(clips[0]["render"], voices, book / "refs")
+        for c in clips:
+            count = cfg["short_takes"] if len(c["spoken"]) <= cfg["short_chars"] else cfg["retakes"]
+            for k in range(1, count + 1):
+                seed = render.seed_for(c["seg"], c["n"], k)
+                audio, sr = tts.speak(c["spoken"], c["voice"], seed)
+                path = c["path"].with_name(f'{c["seg"]}-{c["n"]}.take{k}.wav')
+                audio_write(str(path), render.tidy(audio, sr), sr)
+                takes.append({"clip": c["file"], "take": k, "seed": seed, "path": path, "spoken": c["spoken"],
+                              "voice": c["voice"]})
+        render._free(tts.model)
+        del tts
+        gc.collect()                                                    # before the next model loads
     return takes
 
 
@@ -326,6 +358,9 @@ def qc(book, chapters, cfg):
              for v in voices}
     flagged = [c for c in clips if reasons(c["metrics"], thr[c["voice"]])]
     log.info("%d of %d clips flagged; thresholds %s", len(flagged), len(clips), thr)
+    settings = {d: tts_settings(indexes[d]) for d in {c["dir"] for c in flagged}}
+    for c in flagged:
+        c["render"] = settings[c["dir"]]
 
     takes = retake(book, flagged, cfg) if flagged else []            # 2. retake (TTS only)
     if takes:

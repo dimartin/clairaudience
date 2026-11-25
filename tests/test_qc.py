@@ -52,9 +52,26 @@ def test_gap_window_spans_the_neighbouring_words():
     assert qc.gap_window(words, 0, 2.0, 0.5) == (0.0, 0.5)    # missing at the start
 
 
+def test_gap_window_folds_whispers_words_like_the_transcript():
+    # "Monte-Cristo" folds to two words, so the gap for "towards" is after hyp word 3, not 2
+    spoken, heard = "Monte-Cristo sailed towards the harbour.", "Monte-Cristo sailed the harbour."
+    words = [("Monte-Cristo", 0.0, 0.8), ("sailed", 0.9, 1.3), ("the", 2.0, 2.1), ("harbour.", 2.2, 2.8)]
+    [(w, j)] = qc.word_check(spoken, heard)["missing"]
+    assert (w, j) == ("towards", 3)
+    assert qc.gap_window(words, j, 3.0, 0.1) == pytest.approx((1.2, 2.1))   # between "sailed" and "the"
+    assert qc.fold_words([("—", 0.0, 0.1), ("he's", 0.2, 0.4)]) == [("hes", 0.2, 0.4)]
+
+
 def test_second_listen_clears_a_word_it_hears():
     missing = [("harbour", 6), ("captain", 2)]
-    assert qc.confirmed_missing(missing, {"harbour": "to the harbour", "captain": "the"}) == ["captain"]
+    assert qc.confirmed_missing(missing, ["to the harbour", "the"]) == ["captain"]
+
+
+def test_second_listen_is_per_occurrence():
+    missing = [("harbour", 2), ("harbour", 6)]                 # missing twice from one line
+    assert qc.confirmed_missing(missing, ["the harbour", "the"]) == ["harbour"]
+    assert qc.confirmed_missing(missing, ["the", "the harbour"]) == ["harbour"]
+    assert qc.confirmed_missing(missing, ["the harbour", "harbour"]) == []
 
 
 # --- thresholds and flags ---
@@ -98,8 +115,8 @@ def test_reasons_and_badness():
 THR = {"cer": 0.2, "wrong_run": 3, "extra": 2, "pitch": 4.0, "length": 0.5}
 
 
-def take(cer=0.0, pitch=1.0, heard="", missing=()):
-    return {"heard": heard, "metrics": {"cer": cer, "wrong_run": 0, "extra": 0, "pitch": pitch, "length": 0.0,
+def take(cer=0.0, pitch=1.0, heard="", missing=(), length=0.0):
+    return {"heard": heard, "metrics": {"cer": cer, "wrong_run": 0, "extra": 0, "pitch": pitch, "length": length,
                                         "missing": list(missing)}}
 
 
@@ -111,6 +128,19 @@ def test_best_take_is_the_lowest_badness_and_may_be_the_current_one():
 def test_short_line_keeps_the_closest_pitch_among_takes_whose_words_pass():
     takes = [take(pitch=7.0), take(pitch=0.5, cer=0.6), take(pitch=2.0), take(pitch=1.0, cer=0.1)]
     assert qc.best_take(takes, THR, short=True) == 3
+
+
+def test_short_line_flagged_for_length_keeps_a_retake_that_passes():
+    # Prudence's case: take 0 has the closest pitch but fails on length; the retakes pass
+    takes = [take(pitch=0.5, length=2.0)] + [take(pitch=float(p)) for p in range(1, 9)]
+    best = qc.best_take(takes, THR, short=True)
+    assert best == 1                                           # the closest pitch among passing takes
+    assert qc.reasons(takes[best]["metrics"], THR) == [] and qc.badness(takes[best]["metrics"], THR) == 0.25
+
+
+def test_short_line_with_no_passing_take_falls_back_to_badness():
+    takes = [take(pitch=0.5, length=2.0), take(pitch=3.0, length=0.8), take(pitch=1.0, length=1.5)]
+    assert qc.best_take(takes, THR, short=True) == 1           # badness 1.6, against 4.0 and 3.0
 
 
 def test_short_line_with_no_good_words_falls_back_to_badness():
@@ -144,6 +174,54 @@ def test_report_lists_reasons_scores_and_the_recognizer_note():
     assert "| 14-0.wav | narrator | pitch 6.0 > 4.0 | 1.5 | 0.4 | take 3 |  | " + "x" * 80 + "... |" in md
 
 
+# --- the speech model for retakes ---
+
+def test_tts_settings_come_from_the_index():
+    idx = {"chapter": 4, "profile": "16gb-small", "tts": "chatterbox", "tts_model": "mlx-community/chatterbox-turbo-4bit"}
+    never = lambda: pytest.fail("the default profile must not be read when the index records the model")
+    assert qc.tts_settings(idx, load=never) == {"profile": "16gb-small", "tts": "chatterbox",
+                                                "tts_model": "mlx-community/chatterbox-turbo-4bit"}
+
+
+def test_tts_settings_of_an_old_index_fall_back_with_a_warning(caplog):
+    cfg = {"profile": "16gb", "tts": "voxcpm2", "tts_model": "mlx-community/VoxCPM2-bf16", "llm_model": "x"}
+    with caplog.at_level("WARNING", logger="qc"):
+        got = qc.tts_settings({"chapter": 4, "clips": []}, load=lambda: cfg)
+    assert got == {"profile": "16gb", "tts": "voxcpm2", "tts_model": "mlx-community/VoxCPM2-bf16"}
+    assert "lines/004/index.json does not record the speech model" in caplog.text
+
+
+def test_retake_uses_the_recorded_model_one_at_a_time(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAIRAUDIENCE_PROFILE", "16gb")       # what a standalone run would have picked
+    events = []
+
+    class FakeTTS:
+        def __init__(self, cfg, voices, refdir):
+            events.append(("load", cfg["tts"], cfg["tts_model"]))
+            self.model = cfg["tts_model"]
+
+        def speak(self, text, vid, seed):
+            return text, 1
+
+    fake_render = types.SimpleNamespace(
+        TTS=FakeTTS, load_voices=lambda book: ({"narrator": {}}, {}), tidy=lambda a, sr: a,
+        seed_for=lambda seg, n, take=0: seg * 100 + n + 7919 * take, _free=lambda m: events.append(("free", m)))
+    monkeypatch.setitem(sys.modules, "render", fake_render)
+    audio_io = types.SimpleNamespace(write=lambda path, a, sr: None)
+    monkeypatch.setitem(sys.modules, "mlx_audio", types.SimpleNamespace(audio_io=audio_io))
+    monkeypatch.setitem(sys.modules, "mlx_audio.audio_io", audio_io)
+
+    chatterbox = {"profile": "16gb-small", "tts": "chatterbox", "tts_model": "mlx-community/chatterbox-turbo-4bit"}
+    voxcpm = {"profile": "16gb", "tts": "voxcpm2", "tts_model": "mlx-community/VoxCPM2-bf16"}
+    flagged = [{"seg": s, "n": 0, "file": f"{s}-0.wav", "path": tmp_path / f"{s}-0.wav", "spoken": "Hello.",
+                "voice": "narrator", "render": r} for s, r in ((1, chatterbox), (2, voxcpm), (3, chatterbox))]
+    takes = qc.retake(tmp_path, flagged, {**CFG, "short_takes": 2})
+    assert events == [("load", "chatterbox", "mlx-community/chatterbox-turbo-4bit"),
+                      ("free", "mlx-community/chatterbox-turbo-4bit"),
+                      ("load", "voxcpm2", "mlx-community/VoxCPM2-bf16"), ("free", "mlx-community/VoxCPM2-bf16")]
+    assert sorted((t["clip"], t["take"]) for t in takes) == [(f"{s}-0.wav", k) for s in (1, 2, 3) for k in (1, 2)]
+
+
 # --- the whole pass, every model stubbed ---
 
 def test_qc_flags_retakes_keeps_the_best_and_reports(tmp_path, monkeypatch):
@@ -153,7 +231,8 @@ def test_qc_flags_retakes_keeps_the_best_and_reports(tmp_path, monkeypatch):
     texts = ["The sea was calm that night.", "Good day to you, sir.", "Where is the harbour master now?"]
     clips = [{"seg": i, "n": 0, "file": f"{i}-0.wav", "kind": "narration", "para": i, "voice": "narrator",
               "text": t, "spoken": t, "seed": i * 100} for i, t in enumerate(texts)]
-    (lines / "index.json").write_text(json.dumps({"chapter": 4, "clips": clips}))
+    recorded = {"profile": "16gb-small", "tts": "chatterbox", "tts_model": "mlx-community/chatterbox-turbo-4bit"}
+    (lines / "index.json").write_text(json.dumps({"chapter": 4, **recorded, "clips": clips}))
     for c in clips:
         (lines / c["file"]).write_text(c["text"])               # a "clip" is its own transcript here
     (book / "audio").mkdir()
@@ -173,9 +252,12 @@ def test_qc_flags_retakes_keeps_the_best_and_reports(tmp_path, monkeypatch):
 
     monkeypatch.setattr(qc, "ASR", FakeASR)
 
+    retaken = []
+
     def retake(book_, flagged, cfg):
         out = []
         for c in flagged:
+            retaken.append(c["render"])
             for k in (1, 2):
                 path = c["path"].with_name(f'{c["seg"]}-{c["n"]}.take{k}.wav')
                 path.write_text(c["spoken"] + "\n")            # a retake: heard in full
@@ -198,6 +280,8 @@ def test_qc_flags_retakes_keeps_the_best_and_reports(tmp_path, monkeypatch):
     idx = json.loads((lines / "index.json").read_text())["clips"]
     assert (idx[2]["seed"], idx[2]["take"]) == (1001, 1)
     assert assembled == [book / "audio" / "004.wav"]
+    assert retaken == [recorded]                               # retaken with the model that rendered it
+    assert json.loads((lines / "index.json").read_text())["tts_model"] == recorded["tts_model"]
     assert loaded == ["small.en", "small.en"]                   # scored, then the takes scored
     assert "| 2-0.wav | narrator | cer 0.258 > 0.15; missing harbour |" in (book / "qc" / "004.md").read_text()
 

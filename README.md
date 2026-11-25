@@ -111,17 +111,20 @@ Roman numerals and all-caps words are also rewritten for the TTS only (`normalis
 
 ## Line checks (QC)
 
-Render keeps every line as its own clip in `out/<book>/lines/NNN/`, with an `index.json` (the text sent to the TTS, the voice, the seed). The `qc` stage runs after `render` and checks each clip:
+Render keeps every line as its own clip in `out/<book>/lines/NNN/`, with an `index.json` (the text sent to the TTS, the voice, the seed, and the profile and speech model that rendered the chapter). The `qc` stage runs after `render` and checks each clip:
 
 - **Words:** Whisper's transcript against the line: character error rate, the longest run of wrong words, extra speech before or after, and missing words of 5 letters or more, each confirmed by a second listen to a short window around it.
 - **Voice:** semitones between the clip's median pitch and the voice's reference clip.
 - **Length:** seconds per character against the voice's median.
 
-A clip fails a check when it is over `max(floor, k × that voice's median)`, set in `[qc]` in `config.toml`, so the bar is relative to the book. Flagged lines are rendered again with new seeds (8 takes for lines of 80 characters or fewer, keeping the take closest to the reference pitch), and the best take wins, the current one included. When every take is heard the same wrong way, the report blames the recognizer and lists misheard names as `pronunciations.json` candidates. `out/<book>/qc/NNN.md` lists the flagged lines with reasons and before/after scores; listen to those.
+A clip fails a check when it is over `max(floor, k × that voice's median)`, set in `[qc]` in `config.toml`, so the bar is relative to the book. Flagged lines are rendered again with new seeds, by the speech model recorded in `index.json`, so retakes never mix models. Lines of 80 characters or fewer get 8 takes and keep the take closest to the reference pitch among those that pass every check; otherwise the best take wins, the current one included. When every take is heard the same wrong way, the report blames the recognizer and lists misheard names as `pronunciations.json` candidates. `out/<book>/qc/NNN.md` lists the flagged lines with reasons and before/after scores; listen to those.
 
 ```bash
-.venv/bin/python qc.py out/<book> 4      # one chapter; with no chapters, every rendered one
+.venv/bin/python clairaudience.py run books/<book>.epub --profile 16gb-small --only qc --chapters 4
+.venv/bin/python qc.py out/<book> 4      # the same; with no chapters, every rendered one
 ```
+
+A chapter rendered before `index.json` recorded the speech model is retaken with `--profile`, `CLAIRAUDIENCE_PROFILE` or the default profile, and qc logs a warning; pass the profile that rendered it.
 
 Thresholds come from the clips checked in that run, so check the whole book for book-relative thresholds.
 

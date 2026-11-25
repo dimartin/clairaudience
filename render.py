@@ -5,7 +5,8 @@ design: the voice-design model speaks each voice's reference line from its descr
 render: the TTS model clones each reference and voices every segment of each chapter
         script -> <book>/audio/NNN.wav. Narration goes to the narrator voice. Every chunk
         is also kept as <book>/lines/NNN/<seg>-<n>.wav, listed in lines/NNN/index.json
-        (text sent to the TTS, voice, seed), so qc.py can check and retake single lines.
+        (text sent to the TTS, voice, seed, and the profile and speech model that rendered
+        the chapter), so qc.py can check and retake single lines with the same model.
 
 Usage: python render.py design out/<book>
        python render.py render out/<book> [chapter ...]
@@ -136,6 +137,7 @@ class TTS:
     def __init__(self, cfg, voices, refdir):
         from mlx_audio.tts.utils import load_model
         self.kind, self.voices, self.refdir = cfg["tts"], voices, refdir
+        self.profile, self.model_id = cfg.get("profile"), cfg["tts_model"]
         self._refs = {}
         if self.kind == "higgs":
             # mlx-audio 0.5.7 drops its own higgs_multimodal_qwen3 mapping when the repo name
@@ -245,8 +247,9 @@ def render_chapter(tts, script, voice_map, lexicon, out_path, words=None):
             el = time.time() - t_start
             log.info("ch%s seg %d/%d, %.0fs audio in %.0fs (RTF %.2f)", script["chapter"], i, len(segs),
                      audio_secs, el, el / max(audio_secs, 1))
-    (lines_dir / "index.json").write_text(json.dumps({"chapter": script["chapter"], "clips": clips}, indent=1,
-                                                     ensure_ascii=False))
+    index = {"chapter": script["chapter"], "profile": tts.profile, "tts": tts.kind, "tts_model": tts.model_id,
+             "clips": clips}
+    (lines_dir / "index.json").write_text(json.dumps(index, indent=1, ensure_ascii=False))
     assemble(lines_dir, out_path)
     el = time.time() - t_start
     log.info("wrote %s: %.0fs audio in %.0fs (RTF %.2f)", out_path, audio_secs, el, el / max(audio_secs, 1))

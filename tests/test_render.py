@@ -1,4 +1,4 @@
-"""render.collect / long_enough. Needs mlx-audio (Apple Silicon); skipped elsewhere."""
+"""render.collect / long_enough / assemble / render_chapter. Needs mlx-audio (Apple Silicon); skipped elsewhere."""
 
 from types import SimpleNamespace
 
@@ -58,3 +58,15 @@ def test_assemble_joins_clips_in_index_order_with_pauses(tmp_path):
 def test_seed_for_is_fixed_per_line_and_changes_per_take():
     assert render.seed_for(12, 0) == render.seed_for(12, 0)
     assert len({render.seed_for(12, 0, k) for k in range(8)}) == 8
+
+
+def test_render_chapter_records_the_profile_and_speech_model(tmp_path):
+    tts = SimpleNamespace(kind="chatterbox", profile="16gb-small", model_id="mlx-community/chatterbox-turbo-4bit",
+                          voices={"narrator": {}},
+                          speak=lambda text, vid, seed: (np.full(24000, 0.1, dtype=np.float32), 24000))
+    script = {"chapter": 4, "segments": [{"id": 0, "kind": "narration", "speaker": None, "para": 0, "text": "Hi."}]}
+    (tmp_path / "audio").mkdir()
+    render.render_chapter(tts, script, {}, [], tmp_path / "audio" / "004.wav")
+    idx = render.json.loads((tmp_path / "lines" / "004" / "index.json").read_text())
+    assert (idx["profile"], idx["tts"], idx["tts_model"]) == ("16gb-small", "chatterbox",
+                                                              "mlx-community/chatterbox-turbo-4bit")
