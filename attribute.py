@@ -7,7 +7,7 @@ Every quote records how its speaker was decided, in "source" (narration has none
   tag           the dialogue tag names a cast member
   tag-resolved  a nameless tag ("said she") resolved by two agreeing reads
   llm           the model's label, with no override
-  unknown       the model gave no speaker
+  unknown       the model gave no usable speaker (none, or a name not in the cast)
   user          edited by hand; a rerun keeps these lines as they are
 
 Usage: python attribute.py out/<book> [chapter ...]

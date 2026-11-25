@@ -92,7 +92,7 @@ Every quote in `NNN.script.json` has a `source` that says how its speaker was de
 | `tag` | a dialogue tag names a cast member ("said Danglars") |
 | `tag-resolved` | a nameless tag ("said she") resolved by two agreeing reads |
 | `llm` | the model's label, with nothing to confirm it |
-| `unknown` | the model gave no speaker |
+| `unknown` | the model gave no usable speaker (none, or a name not in the cast) |
 | `user` | edited by hand |
 
 Narration has no `source`. The attribute log prints the counts per chapter and the share of `llm` lines; those are the lines to check first. When you correct a speaker by hand, set its `source` to `user`: a rerun of `attribute` keeps those lines as long as the quote's text is unchanged.
