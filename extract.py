@@ -1,7 +1,10 @@
 """Split an EPUB into plain-text chapters, in spine order.
 
 Usage: python extract.py books/monte-cristo.epub out/monte-cristo
-Writes NNN.txt per spine document that has a chapter heading, plus index.json.
+Writes NNN.txt per spine document that has a chapter heading (an h1-h3 starting "Chapter "),
+plus index.json, and words.json: the book's own lexicon for reading numerals and caps aloud
+(normalise.py). Its headings are the h1-h3 headings of those kept documents only; a skipped
+document's headings are not recorded.
 """
 
 import json
@@ -13,6 +16,8 @@ import zipfile
 from html.parser import HTMLParser
 from pathlib import Path
 from xml.etree import ElementTree as ET
+
+import normalise
 
 log = logging.getLogger("extract")
 
@@ -27,7 +32,7 @@ SKIP = {"script", "style", "head"}
 class TextParser(HTMLParser):
     def __init__(self):
         super().__init__()
-        self.parts, self.heading, self._in_h, self._skip = [], None, False, 0
+        self.parts, self.heading, self.headings, self._in_h, self._skip = [], None, [], False, 0
 
     def handle_starttag(self, tag, attrs):
         if tag in SKIP:
@@ -43,6 +48,8 @@ class TextParser(HTMLParser):
         if tag in ("h1", "h2", "h3") and self._in_h:
             self._in_h = False
             text = " ".join("".join(self._h).split())
+            if text:
+                self.headings.append(text)
             if text and self.heading is None and re.match(r"chapter\s", text, re.I):
                 self.heading = text
         if tag in BLOCK:
@@ -85,7 +92,7 @@ def spine_docs(zf):
 def main(epub, outdir):
     out = Path(outdir)
     out.mkdir(parents=True, exist_ok=True)
-    index = []
+    index, texts, headings = [], [], []
     with zipfile.ZipFile(epub) as zf:
         for path in spine_docs(zf):
             p = TextParser()
@@ -96,10 +103,15 @@ def main(epub, outdir):
             n = len(index) + 1
             text = p.text()
             (out / f"{n:03}.txt").write_text(text)
+            texts.append(text)
+            headings += p.headings
             index.append({"n": n, "title": p.heading, "chars": len(text),
                           "quotes": text.count("“") + text.count('"'), "src": path})
         (out / "book.json").write_text(json.dumps(book_meta(zf), indent=1, ensure_ascii=False))
     (out / "index.json").write_text(json.dumps(index, indent=1))
+    words = normalise.book_words(texts, headings)
+    (out / "words.json").write_text(json.dumps(words, ensure_ascii=False))
+    log.info("words.json: %d known words, title numerals %s", len(words["known"]), words["title_numerals"])
     log.info("wrote %d chapters to %s", len(index), out)
 
 
