@@ -90,7 +90,7 @@ Every quote in `NNN.script.json` has a `source` that says how its speaker was de
 | `source` | Meaning |
 |---|---|
 | `tag` | a dialogue tag names a cast member ("said Danglars") |
-| `tag-resolved` | a nameless tag ("said she", "his father replied") resolved by two agreeing reads: the profile's text model, then `tag_check_model` if the profile sets one or the same model with another seed |
+| `tag-resolved` | a nameless tag ("said she", "said his father") resolved by two agreeing reads: the profile's text model, then `tag_check_model` if the profile sets one or the same model with another seed |
 | `llm` | the model's label, with nothing to confirm it |
 | `unknown` | the model gave no usable speaker (none, or a name not in the cast) |
 | `user` | edited by hand |
