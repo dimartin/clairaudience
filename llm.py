@@ -2,7 +2,8 @@
 
 server: an OpenAI-compatible endpoint (e.g. mtplx). The model stays loaded elsewhere.
 mlx:    mlx-lm loads the model inside this process; it is freed when the process exits,
-        which is how the pipeline keeps one model in memory at a time.
+        which is how the pipeline keeps one model in memory at a time. The exception is
+        attribute with tag_check_model set: that process holds both models at once.
 """
 
 import json

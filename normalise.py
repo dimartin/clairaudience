@@ -1,6 +1,7 @@
 """TTS-only normalisation of roman numerals and all-caps words, using the book as its own
 lexicon. Like the respellings, it changes only what the TTS reads; the book text and the
-scripts stay as written.
+scripts stay as written. It runs before the respellings (speakable), so their output is
+read as written.
 
 Evidence comes from the book, collected once at extract into <book>/words.json:
   known           every word the book writes lowercase-initial somewhere ("nothing", not
@@ -173,8 +174,7 @@ def numerals(text, title, heading):
 def normalise(text, words, opens_paragraph=False, heading=None):
     """What the TTS should read for text. words: load()'s result. opens_paragraph: text is
     narration at the start of a paragraph, where a heading can be. heading: whether text is
-    one of the book's headings; decided from text when None (render decides it before the
-    respellings change the text)."""
+    one of the book's headings; decided from text when None."""
     if not words:
         return text
     if heading is None:
@@ -183,3 +183,14 @@ def normalise(text, words, opens_paragraph=False, heading=None):
     if out != text:
         log.debug("normalised %r -> %r", text, out)
     return out
+
+
+def speakable(text, lexicon, words=None, opens_paragraph=False):
+    """What the TTS reads: numerals and caps first, on the book's own text, then the
+    respellings. lexicon: [(pattern, respelling)] from render.load_lexicon. In this order a
+    respelling's capitalised stress ("MER-say-deez") is never spelled out as an acronym, and
+    whether text is a heading is decided before the respellings change it."""
+    text = normalise(text, words, opens_paragraph)
+    for pat, rep in lexicon:
+        text = pat.sub(rep, text)
+    return text

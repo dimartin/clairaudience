@@ -12,7 +12,8 @@ freed, then Whisper scores the takes. For each clip:
 
 A clip fails a metric when it is over max(floor, k x the voice's median for that metric),
 so the bar is relative to the book. Flagged lines are retaken with new seeds (several takes
-for short lines) with the speech model recorded in lines/NNN/index.json, and the best
+for short lines; index.json counts the qc runs in "qc_runs" and each run draws seeds no earlier
+run used) with the speech model recorded in lines/NNN/index.json, and the best
 take, the current one included, is kept. When every take
 transcribes the same wrong way, the recognizer is blamed, not the TTS, and a misheard name
 is listed as a pronunciations.json candidate.
@@ -308,6 +309,15 @@ def tts_settings(idx, load=load_config):
     return {k: cfg.get(k) for k in ("profile", "tts", "tts_model")}
 
 
+RUN_STRIDE = 1000   # take numbers per qc run in the seed: run r draws takes r*1000+1, r*1000+2, ...
+
+
+def retake_take(k, run):
+    """The take number fed to render.seed_for for take k of qc run run (0 for the first run,
+    which keeps the seeds qc drew before runs were counted)."""
+    return RUN_STRIDE * run + k
+
+
 def retake(book, flagged, cfg):
     """Render new takes of each flagged clip with new seeds, with the speech model in the
     clip's "render" settings (one model loaded at a time). Returns the take items."""
@@ -323,7 +333,7 @@ def retake(book, flagged, cfg):
         for c in clips:
             count = cfg["short_takes"] if len(c["spoken"]) <= cfg["short_chars"] else cfg["retakes"]
             for k in range(1, count + 1):
-                seed = render.seed_for(c["seg"], c["n"], k)
+                seed = render.seed_for(c["seg"], c["n"], retake_take(k, c.get("qc_run", 0)))
                 audio, sr = tts.speak(c["spoken"], c["voice"], seed)
                 path = c["path"].with_name(f'{c["seg"]}-{c["n"]}.take{k}.wav')
                 audio_write(str(path), render.tidy(audio, sr), sr)
@@ -338,10 +348,18 @@ def retake(book, flagged, cfg):
 def qc(book, chapters, cfg):
     dirs = [book / "lines" / f"{int(n):03}" for n in chapters] if chapters else sorted((book / "lines").glob("[0-9]*"))
     indexes = {d: json.loads((d / "index.json").read_text()) for d in dirs if (d / "index.json").exists()}
+    if not chapters:
+        unchecked = sorted(int(p.stem) for p in (book / "audio").glob("[0-9][0-9][0-9].wav")
+                           if not (book / "lines" / p.stem / "index.json").exists())
+        if unchecked:
+            log.warning("chapters %s have audio but no lines/NNN/index.json (rendered before line clips "
+                        "were kept), so qc skips them; render them again to check them",
+                        ", ".join(str(n) for n in unchecked))
     clips = []
     for d, idx in indexes.items():
         for c in idx["clips"]:
-            clips.append({**c, "chapter": idx["chapter"], "dir": d, "path": d / c["file"]})
+            clips.append({**c, "chapter": idx["chapter"], "dir": d, "path": d / c["file"],
+                          "qc_run": idx.get("qc_runs", 0)})
     if not clips:
         log.info("no line clips; render first")
         return
@@ -396,6 +414,7 @@ def qc(book, chapters, cfg):
     for d, idx in indexes.items():
         n = idx["chapter"]
         mine = rows.get(d, [])
+        idx["qc_runs"] = idx.get("qc_runs", 0) + 1                     # the next run draws fresh seeds
         (d / "index.json").write_text(json.dumps(idx, indent=1, ensure_ascii=False))
         scored = [{k: c[k] for k in ("file", "voice", "heard", "metrics")} for c in clips if c["dir"] == d]
         (qcdir / f"{n:03}.json").write_text(json.dumps({"chapter": n, "thresholds": thr, "flagged": mine,

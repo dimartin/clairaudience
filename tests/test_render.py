@@ -31,7 +31,7 @@ def test_long_enough_loops_a_short_ref_and_keeps_a_long_one(tmp_path):
     assert render.long_enough(long_, cache) == long_
 
 
-def test_speakable_respells_then_normalises():
+def test_speakable_normalises_then_respells():
     lexicon = [(render.re.compile(r"\bCaderousse\b"), "Cad-roose")]
     words = {"known": {"the"}, "title_numerals": {"I", "II"}, "headings": {"II. Father", "II. Caderousse"}}
     assert render.speakable("Caderousse and the CIA", lexicon, words) == "Cad-roose and the C. I. A."
@@ -70,3 +70,9 @@ def test_render_chapter_records_the_profile_and_speech_model(tmp_path):
     idx = render.json.loads((tmp_path / "lines" / "004" / "index.json").read_text())
     assert (idx["profile"], idx["tts"], idx["tts_model"]) == ("16gb-small", "chatterbox",
                                                               "mlx-community/chatterbox-turbo-4bit")
+
+
+def test_speakable_does_not_spell_out_a_respelling():
+    lexicon = [(render.re.compile(r"\bMercédès\b"), "MER-say-deez")]
+    words = {"known": {"the"}, "title_numerals": set(), "headings": set()}
+    assert render.speakable("Mercédès wept", lexicon, words) == "MER-say-deez wept"

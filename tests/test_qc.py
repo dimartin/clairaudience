@@ -222,6 +222,37 @@ def test_retake_uses_the_recorded_model_one_at_a_time(tmp_path, monkeypatch):
     assert sorted((t["clip"], t["take"]) for t in takes) == [(f"{s}-0.wav", k) for s in (1, 2, 3) for k in (1, 2)]
 
 
+def _seed_only_render(monkeypatch):
+    class FakeTTS:
+        def __init__(self, cfg, voices, refdir):
+            self.model = None
+
+        def speak(self, text, vid, seed):
+            return text, 1
+
+    fake_render = types.SimpleNamespace(
+        TTS=FakeTTS, load_voices=lambda book: ({"narrator": {}}, {}), tidy=lambda a, sr: a,
+        seed_for=lambda seg, n, take=0: seg * 100 + n + 7919 * take, _free=lambda m: None)
+    monkeypatch.setitem(sys.modules, "render", fake_render)
+    audio_io = types.SimpleNamespace(write=lambda path, a, sr: None)
+    monkeypatch.setitem(sys.modules, "mlx_audio", types.SimpleNamespace(audio_io=audio_io))
+    monkeypatch.setitem(sys.modules, "mlx_audio.audio_io", audio_io)
+
+
+def test_a_second_qc_run_draws_fresh_seeds(tmp_path, monkeypatch):
+    _seed_only_render(monkeypatch)
+    model = {"profile": "16gb-small", "tts": "chatterbox", "tts_model": "m"}
+
+    def seeds(run):
+        clip = {"seg": 5, "n": 0, "file": "5-0.wav", "path": tmp_path / "5-0.wav", "spoken": "Hello.",
+                "voice": "narrator", "render": model, "qc_run": run}
+        return [t["seed"] for t in qc.retake(tmp_path, [clip], {**CFG, "short_takes": 3})]
+
+    first, second = seeds(0), seeds(1)
+    assert first == [500 + 7919 * k for k in (1, 2, 3)]         # the first run keeps today's seeds
+    assert len(set(first + second)) == 6                         # the rerun repeats none of them
+
+
 # --- the whole pass, every model stubbed ---
 
 def test_qc_flags_retakes_keeps_the_best_and_reports(tmp_path, monkeypatch):
@@ -282,6 +313,7 @@ def test_qc_flags_retakes_keeps_the_best_and_reports(tmp_path, monkeypatch):
     assert assembled == [book / "audio" / "004.wav"]
     assert retaken == [recorded]                               # retaken with the model that rendered it
     assert json.loads((lines / "index.json").read_text())["tts_model"] == recorded["tts_model"]
+    assert json.loads((lines / "index.json").read_text())["qc_runs"] == 1   # the next run draws new seeds
     assert loaded == ["small.en", "small.en"]                   # scored, then the takes scored
     assert "| 2-0.wav | narrator | cer 0.258 > 0.15; missing harbour |" in (book / "qc" / "004.md").read_text()
 
@@ -292,3 +324,20 @@ def test_median_pitch_of_a_tone():
     t = np.arange(sr) / sr
     assert qc.median_pitch((0.3 * np.sin(2 * np.pi * 150 * t)).astype(np.float32), sr) == pytest.approx(150, rel=0.03)
     assert qc.median_pitch(np.zeros(sr, dtype=np.float32), sr) is None
+
+
+def test_qc_of_the_whole_book_names_chapters_it_cannot_check(tmp_path, monkeypatch, caplog):
+    book = tmp_path
+    for n in (1, 2, 3):
+        (book / "audio").mkdir(exist_ok=True)
+        (book / "audio" / f"{n:03}.wav").write_text("")
+    (book / "lines" / "002").mkdir(parents=True)
+    (book / "lines" / "002" / "index.json").write_text(json.dumps({"chapter": 2, "clips": []}))
+    with caplog.at_level("WARNING", logger="qc"):
+        qc.qc(book, [], CFG)
+    warnings = [r.getMessage() for r in caplog.records if r.levelname == "WARNING"]
+    assert len(warnings) == 1 and warnings[0].startswith("chapters 1, 3 have audio but no lines/NNN/index.json")
+    caplog.clear()
+    with caplog.at_level("WARNING", logger="qc"):
+        qc.qc(book, ["1"], CFG)                                    # chapters named: no book-wide warning
+    assert not [r for r in caplog.records if r.levelname == "WARNING"]
