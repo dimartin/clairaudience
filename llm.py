@@ -42,14 +42,17 @@ def load_config(profile=None):
     return cfg
 
 
-def chat(cfg, prompt, max_tokens=None):
+def chat(cfg, prompt, max_tokens=None, seed=None, schema=None):
+    """seed: a sampling seed, so two reads of one prompt are independent draws.
+    schema: a JSON schema for the answer, sent only to a server with structured_output
+    set; callers still validate the answer, since most backends ignore it."""
     if max_tokens:
         cfg = {**cfg, "max_tokens": max_tokens}
     t0 = time.time()
     if cfg["llm_backend"] == "mlx":
-        text, usage = _chat_mlx(cfg, prompt)
+        text, usage = _chat_mlx(cfg, prompt, seed)
     else:
-        text, usage = _chat_server(cfg, prompt)
+        text, usage = _chat_server(cfg, prompt, seed, schema)
     log.info("llm %.1fs prompt=%s completion=%s", time.time() - t0, usage.get("prompt_tokens"),
              usage.get("completion_tokens"))
     if (usage.get("completion_tokens") or 0) >= cfg["max_tokens"] - 5:
@@ -62,7 +65,7 @@ class Truncated(ValueError):
     """The model's answer was cut off at max_tokens; callers retry like any bad answer."""
 
 
-def _chat_server(cfg, prompt):
+def _chat_server(cfg, prompt, seed=None, schema=None):
     body = {
         "model": cfg["llm_model"],
         "messages": [{"role": "user", "content": prompt}],
@@ -70,6 +73,10 @@ def _chat_server(cfg, prompt):
         "max_tokens": cfg["max_tokens"],
         "chat_template_kwargs": {"enable_thinking": False},
     }
+    if seed is not None:
+        body["seed"] = seed
+    if schema and cfg.get("structured_output"):
+        body["response_format"] = {"type": "json_schema", "json_schema": {"name": "answer", "schema": schema}}
     req = urllib.request.Request(
         cfg["llm_base_url"] + "/chat/completions",
         data=json.dumps(body).encode(),
@@ -91,15 +98,19 @@ def _chat_server(cfg, prompt):
     return resp["choices"][0]["message"]["content"], resp.get("usage", {})
 
 
-def _chat_mlx(cfg, prompt):
+def _chat_mlx(cfg, prompt, seed=None):
+    import mlx.core as mx
     from mlx_lm import generate, load
     from mlx_lm.sample_utils import make_logits_processors, make_sampler
 
-    if "model" not in _mlx:
+    # keyed by model, so a second checking model (tag_check_model) can stay loaded too
+    if cfg["llm_model"] not in _mlx:
         t0 = time.time()
-        _mlx["model"], _mlx["tok"] = load(cfg["llm_model"])
+        _mlx[cfg["llm_model"]] = load(cfg["llm_model"])
         log.info("loaded %s in %.1fs", cfg["llm_model"], time.time() - t0)
-    tok = _mlx["tok"]
+    model, tok = _mlx[cfg["llm_model"]]
+    if seed is not None:
+        mx.random.seed(seed)
     messages = [{"role": "user", "content": prompt}]
     try:
         text = tok.apply_chat_template(messages, add_generation_prompt=True, tokenize=False,
@@ -107,7 +118,7 @@ def _chat_mlx(cfg, prompt):
     except TypeError:
         text = tok.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
     # a mild repetition penalty stops small quantized models looping until max_tokens
-    out = generate(_mlx["model"], tok, prompt=text, max_tokens=cfg["max_tokens"],
+    out = generate(model, tok, prompt=text, max_tokens=cfg["max_tokens"],
                    sampler=make_sampler(temp=cfg["temperature"]),
                    logits_processors=make_logits_processors(repetition_penalty=cfg.get("repetition_penalty", 1.1)))
     return out, {"prompt_tokens": len(tok.encode(text)), "completion_tokens": len(tok.encode(out))}

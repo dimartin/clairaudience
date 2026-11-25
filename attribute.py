@@ -1,7 +1,9 @@
 """Attribute every quote to a speaker, using the whole-book cast as the fixed roster.
 
 The LLM labels quotes; then a deterministic pass overrides any quote whose dialogue tag
-("said Danglars", "resumed the Catalan") names a cast member. The book text is unchanged.
+("said Danglars", "resumed the Catalan") names a cast member. A nameless tag ("said she",
+"his father replied") is asked about twice, blind; the speaker is set only when both
+answers agree. The book text is unchanged.
 
 Every quote records how its speaker was decided, in "source" (narration has none):
   tag           the dialogue tag names a cast member
@@ -112,6 +114,97 @@ def tag_override(segs, idx):
     return fixed
 
 
+# A tag with no name: "said she", "he replied", "said his father", "replied the young man".
+PRONOUN = "he|she"
+NAMELESS = re.compile(
+    rf"^(?:(?:[\w’']+\s+){{0,2}}?(?P<pron>{PRONOUN})\s+(?:{VERBS})\b"
+    rf"|(?:[\w’']+\s+){{0,3}}?(?:{VERBS})\s+(?P<who>{PRONOUN}\b|(?:his|her|their|the|a|an)\s+[a-z][\w’\-]+"
+    rf"(?:\s+[a-z][\w’\-]+)?))")
+
+RESOLVE_PROMPT = """Below is a passage from a novel. The quoted line marked >>> is followed by the dialogue tag "{tag}".
+
+Who is "{who}" in that tag, the character who speaks the marked line? It is usually not the person the line before it speaks to.
+
+CHARACTERS (answer with one of these ids, or "unknown" if you can't tell):
+{cast}
+
+Return ONLY a JSON object: {{"speaker": "<id>"}}
+
+PASSAGE:
+{passage}"""
+
+
+def nameless_tags(segs):
+    """(quote index, tag clause, the words naming the speaker) for each quote followed in
+    its paragraph by a tag with no name. Quotes already decided by a tag or by hand are left out."""
+    out = []
+    for i, s in enumerate(segs):
+        if s["kind"] != "narration" or i == 0:
+            continue
+        prev = segs[i - 1]
+        if prev["kind"] != "quote" or prev["para"] != s["para"] or prev.get("source") in ("tag", "user"):
+            continue
+        if m := NAMELESS.match(s["text"]):
+            clause = re.split(r"[,.;:!?—]", s["text"], maxsplit=1)[0].strip()
+            out.append((i - 1, clause, m.group("pron") or m.group("who")))
+    return out
+
+
+def chapter_cast(segs, cast):
+    """Cast ids that speak in the chapter or whose name appears in it."""
+    text = " ".join(s["text"] for s in segs)
+    ids = {s["speaker"] for s in segs if s["kind"] == "quote" and s["speaker"] in cast}
+    for c in cast.values():
+        words = [w for w in c["name"].split() if w.lower().rstrip(".") not in castlib.TITLES and w.lower() != "the"]
+        names = [c["name"], *words, *c.get("aliases", []), *c.get("epithets", [])]
+        if any(re.search(rf"\b{re.escape(n)}\b", text) for n in names if n):
+            ids.add(c["id"])
+    return sorted(ids)
+
+
+def ask_speaker(cfg, prompt, allowed, seed):
+    """One read: a cast id from allowed, "unknown", or None after three invalid answers."""
+    schema = {"type": "object", "properties": {"speaker": {"type": "string", "enum": [*allowed, "unknown"]}},
+              "required": ["speaker"]}
+    for attempt in range(3):
+        try:
+            sp = parse_json(chat(cfg, prompt, max_tokens=100, seed=seed, schema=schema)).get("speaker")
+        except ValueError as e:
+            log.warning("nameless tag read attempt %d: bad JSON (%s)", attempt + 1, e)
+            continue
+        if sp == "unknown" or sp in allowed:
+            return sp
+        log.warning("nameless tag read attempt %d: %r is not a chapter cast id", attempt + 1, sp)
+    return None
+
+
+def resolve_nameless(cfg, segs, cast):
+    """Ask twice, blind, who each nameless tag refers to: once with the profile's model and
+    once with tag_check_model (or the same model with another seed). Only when both name
+    the same cast member is the speaker set, as "tag-resolved". Otherwise the model's
+    chapter label stays as a guess. Returns (tags found, tags anchored)."""
+    tags = nameless_tags(segs)
+    if not tags:
+        return 0, 0
+    allowed = chapter_cast(segs, cast)
+    cast_text = "\n".join(f'{c} | {cast[c]["name"]} | {", ".join(cast[c].get("aliases", []))}' for c in allowed)
+    second = {**cfg, "llm_model": cfg["tag_check_model"]} if cfg.get("tag_check_model") else cfg
+    anchored = 0
+    for qi, clause, who in tags:
+        passage = "\n".join((">>> " if j == qi else "") + (f'"{s["text"]}"' if s["kind"] == "quote" else s["text"])
+                             for j, s in enumerate(segs[max(0, qi - CONTEXT_SEGS):qi + 2], max(0, qi - CONTEXT_SEGS)))
+        prompt = RESOLVE_PROMPT.format(tag=clause, who=who, cast=cast_text, passage=passage)
+        a, b = ask_speaker(cfg, prompt, allowed, seed=1), ask_speaker(second, prompt, allowed, seed=2)
+        q = segs[qi]
+        if a and a == b and a != "unknown":
+            log.info("nameless tag Q%d %r: %s -> %s (both reads agree)", q["id"], clause, q["speaker"], a)
+            q["speaker"], q["source"] = a, "tag-resolved"
+            anchored += 1
+        else:
+            log.info("nameless tag Q%d %r: reads %s / %s, kept %s as a guess", q["id"], clause, a, b, q["speaker"])
+    return len(tags), anchored
+
+
 BATCH_QUOTES = 120   # ~30 output tokens per quote keeps a batch well under max_tokens
 CONTEXT_SEGS = 12    # earlier segments shown (without [Q] markers) so a batch knows who is talking
 
@@ -203,12 +296,14 @@ def attribute_chapter(cfg, book, n, cast, cast_text, idx):
         else:
             s["speaker"], s["emotion"] = "narrator", "neutral"
     fixed = tag_override(segs, idx)
+    nameless, anchored = resolve_nameless(cfg, segs, cast)
     quotes = [s for s in segs if s["kind"] == "quote"]
     out = {"chapter": n, "segments": segs}
     out_path.write_text(json.dumps(out, indent=1, ensure_ascii=False))
     counts = source_counts(quotes)
-    log.info("chapter %d: %d quotes, %d tag overrides; by source: %s; llm share %.0f%%", n, len(quotes), fixed,
-             ", ".join(f"{k} {v}" for k, v in counts.items()), 100 * counts["llm"] / max(len(quotes), 1))
+    log.info("chapter %d: %d quotes, %d tag overrides, %d/%d nameless tags anchored; by source: %s; llm share %.0f%%",
+             n, len(quotes), fixed, anchored, nameless, ", ".join(f"{k} {v}" for k, v in counts.items()),
+             100 * counts["llm"] / max(len(quotes), 1))
 
 
 def main(book_dir, *chapters):

@@ -10,6 +10,10 @@ repetition_penalty = 1.1  # in-process (mlx) models only
 timeout_s = 600
 retries = 6
 min_lines = 5          # characters with fewer spoken lines share the extras' voices
+structured_output = false  # true if llm_base_url's server takes a JSON schema in response_format
+# A nameless dialogue tag ("said she") is read twice: once by llm_model and once by
+# tag_check_model if a profile sets one, else by llm_model with another seed.
+# With the mlx backend both models stay loaded in the attribute process.
 
 # A 16 GB Apple Silicon Mac. Every model runs in-process, one at a time.
 # All models here are Apache-2.0 licensed.
@@ -19,6 +23,7 @@ llm_model = "mlx-community/Qwen3.5-9B-MLX-4bit"
 design_model = "mlx-community/Qwen3-TTS-12Hz-1.7B-VoiceDesign-bf16"
 tts = "voxcpm2"
 tts_model = "mlx-community/VoxCPM2-bf16"
+# tag_check_model = "mlx-community/Qwen3.5-4B-4bit"   # second reader for nameless tags (memory untested)
 
 # Fastest: a 4B for the text stages (faster, less accurate) and 4-bit Chatterbox Turbo,
 # which rendered about 4x faster than VoxCPM2 on an M1 Pro (RTF 0.47 vs 2.04, 2026-10-06).

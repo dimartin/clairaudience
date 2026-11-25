@@ -281,3 +281,115 @@ def test_a_hand_edit_whose_text_changed_is_dropped(tmp_path, monkeypatch):
     attribute.attribute_chapter({}, tmp_path, 1, CAST, "", attribute.name_index(CAST))
     seg = json.loads((tmp_path / "001.script.json").read_text())["segments"][0]
     assert (seg["speaker"], seg["source"]) == ("danglars", "llm")
+
+
+# --- nameless tags: two blind reads, anchored only on agreement ---
+
+
+@pytest.mark.parametrize("tag, who", [
+    ("said she.", "she"),
+    ("he replied.", "he"),
+    ("then she added, softly.", "she"),
+    ("said his father, smiling.", "his father"),
+    ("replied the young man.", "the young man"),
+])
+def test_nameless_tags_are_found(tag, who):
+    segs = script(f"“Yes,” {tag}", speaker="fernand")
+    [(qi, clause, got)] = attribute.nameless_tags(segs)
+    assert (qi, got) == (0, who)
+    assert clause == tag.split(",")[0].rstrip(".")
+
+
+@pytest.mark.parametrize("text", [
+    "“Yes,” and he swallowed another glass.",     # narration, not a tag
+    "“Yes.”\n\nshe said.",                         # tag in the next paragraph
+    "“Yes,” said Danglars.",                       # a named tag is the tag rule's job
+])
+def test_not_nameless_tags(text):
+    segs = script(text, speaker="fernand")
+    attribute.tag_override(segs, attribute.name_index(CAST))
+    assert attribute.nameless_tags(segs) == []
+
+
+def test_a_hand_edit_is_never_asked_about():
+    segs = script("“Yes,” said she.")
+    segs[0]["source"] = "user"
+    assert attribute.nameless_tags(segs) == []
+
+
+def reads(monkeypatch, answers):
+    """Stub chat: answers[seed] is the reply; records every call."""
+    calls = []
+
+    def chat(cfg, prompt, max_tokens=None, seed=None, schema=None):
+        calls.append({"model": cfg.get("llm_model"), "seed": seed, "prompt": prompt, "schema": schema})
+        a = answers[seed]
+        return a.pop(0) if isinstance(a, list) else a
+
+    monkeypatch.setattr(attribute, "chat", chat)
+    return calls
+
+
+def tagged(speaker="edmond_dantes"):
+    segs = script("Danglars looked at Fernand.\n\n“You love her,” said he.", speaker=speaker)
+    for s in segs:
+        if s["kind"] == "quote":
+            s["source"] = "llm"
+    return segs
+
+
+def test_agreeing_reads_anchor_the_speaker(monkeypatch):
+    calls = reads(monkeypatch, {1: '{"speaker": "danglars"}', 2: '{"speaker": "danglars"}'})
+    segs = tagged()
+    assert attribute.resolve_nameless({"llm_model": "m"}, segs, CAST) == (1, 1)
+    q = segs[1]
+    assert (q["speaker"], q["source"]) == ("danglars", "tag-resolved")
+    assert [c["seed"] for c in calls] == [1, 2]
+    # blind: both reads get the same prompt, which carries neither the chapter label nor the other answer
+    assert calls[0]["prompt"] == calls[1]["prompt"]
+    assert ">>> \"You love her,\"" in calls[0]["prompt"] and '"said he"' in calls[0]["prompt"]
+    # only the chapter's cast (named in it, or labelled as a speaker) is offered, as a closed set
+    assert calls[0]["schema"]["properties"]["speaker"]["enum"] == ["danglars", "edmond_dantes", "fernand", "unknown"]
+
+
+def test_chapter_cast_is_who_is_named_or_speaks():
+    segs = script("Danglars looked at the Catalan.\n\n“Yes.”", speaker="unknown")
+    assert attribute.chapter_cast(segs, CAST) == ["danglars", "fernand"]
+
+
+@pytest.mark.parametrize("a, b", [
+    ('{"speaker": "danglars"}', '{"speaker": "fernand"}'),
+    ('{"speaker": "unknown"}', '{"speaker": "unknown"}'),
+    ('{"speaker": "danglars"}', '{"speaker": "unknown"}'),
+])
+def test_disagreement_or_unknown_keeps_the_guess(monkeypatch, a, b):
+    reads(monkeypatch, {1: a, 2: b})
+    segs = tagged()
+    assert attribute.resolve_nameless({}, segs, CAST) == (1, 0)
+    assert (segs[1]["speaker"], segs[1]["source"]) == ("edmond_dantes", "llm")
+
+
+def test_an_answer_outside_the_cast_is_retried(monkeypatch):
+    calls = reads(monkeypatch, {1: ['{"speaker": "villefort"}', "no json", '{"speaker": "fernand"}'],
+                                2: '{"speaker": "fernand"}'})
+    segs = tagged()
+    assert attribute.resolve_nameless({}, segs, CAST) == (1, 1)
+    assert segs[1]["speaker"] == "fernand" and len(calls) == 4
+
+
+def test_three_bad_answers_count_as_no_read(monkeypatch):
+    reads(monkeypatch, {1: "no json", 2: '{"speaker": "fernand"}'})
+    segs = tagged()
+    assert attribute.resolve_nameless({}, segs, CAST) == (1, 0)
+    assert segs[1]["source"] == "llm"
+
+
+def test_second_read_uses_the_check_model(monkeypatch):
+    calls = reads(monkeypatch, {1: '{"speaker": "fernand"}', 2: '{"speaker": "fernand"}'})
+    attribute.resolve_nameless({"llm_model": "big", "tag_check_model": "small"}, tagged(), CAST)
+    assert [c["model"] for c in calls] == ["big", "small"]
+
+
+def test_no_nameless_tag_never_calls_the_model(monkeypatch):
+    monkeypatch.setattr(attribute, "chat", lambda *a, **k: pytest.fail("LLM called"))
+    assert attribute.resolve_nameless({}, script("“Yes,” said Danglars."), CAST) == (0, 0)
