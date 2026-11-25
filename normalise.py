@@ -5,9 +5,11 @@ scripts stay as written.
 Evidence comes from the book, collected once at extract into <book>/words.json:
   known           every word the book writes lowercase-initial somewhere ("nothing", not
                   just "Nothing" or "NOTHING"; a sentence-initial "It" is not evidence)
-  title_numerals  roman numerals that open chapter headings, kept only when the book also
-                  has the one before or after (I, II, III count; a lone DIX doesn't)
-  headings        the book's h1-h3 headings, whitespace collapsed
+  title_numerals  roman numerals that open the recorded headings, kept only when they also
+                  have the one before or after (I, II, III count; a lone DIX doesn't)
+  headings        the h1-h3 headings of the documents extract keeps as chapters (those with
+                  an h1-h3 starting "Chapter "), whitespace collapsed; headings in skipped
+                  documents are not recorded
 
 Rules:
   "Chapter XIV" -> "Chapter fourteen": a Capitalised or ALL-CAPS chapter word, then a
@@ -152,7 +154,7 @@ def spell_out(text, known):
 
 
 def is_heading(text, words):
-    """text is one of the book's headings (extract's h1-h3), as written."""
+    """text is one of the recorded headings (extract's h1-h3 in kept chapters), as written."""
     return " ".join(text.split()) in (words or {}).get("headings", ())
 
 

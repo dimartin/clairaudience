@@ -1,8 +1,10 @@
 """Split an EPUB into plain-text chapters, in spine order.
 
 Usage: python extract.py books/monte-cristo.epub out/monte-cristo
-Writes NNN.txt per spine document that has a chapter heading, plus index.json, and
-words.json: the book's own lexicon for reading numerals and caps aloud (normalise.py).
+Writes NNN.txt per spine document that has a chapter heading (an h1-h3 starting "Chapter "),
+plus index.json, and words.json: the book's own lexicon for reading numerals and caps aloud
+(normalise.py). Its headings are the h1-h3 headings of those kept documents only; a skipped
+document's headings are not recorded.
 """
 
 import json
