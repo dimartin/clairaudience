@@ -22,12 +22,14 @@ def test_extract_writes_the_book_lexicon(tmp_path):
     with zipfile.ZipFile(epub, "w") as z:
         z.writestr("META-INF/container.xml", CONTAINER)
         z.writestr("OEBPS/book.opf", OPF)
-        z.writestr("OEBPS/a.xhtml", doc("Chapter I. The Arrival", "The SECRET was out. Louis XIV knew."))
-        z.writestr("OEBPS/b.xhtml", doc("Chapter II. Father", "TOP SECRET, said the CIA."))
+        z.writestr("OEBPS/a.xhtml", doc("Chapter I. The Arrival", "The SECRET was out. Louis XIV knew the chapter of the arrival."))
+        z.writestr("OEBPS/b.xhtml", doc("Chapter II. Father", "TOP SECRET, said the CIA to his father."))
     extract.main(str(epub), str(tmp_path / "out"))
     words = json.loads((tmp_path / "out/words.json").read_text())
     assert words["title_numerals"] == ["I", "II"]
-    assert {"the", "chapter", "arrival", "father", "louis", "knew"} <= set(words["known"])
-    assert not {"secret", "top", "cia", "xiv"} & set(words["known"])
+    assert {"the", "chapter", "arrival", "father", "knew"} <= set(words["known"])
+    # "Louis" is only ever capitalised, the caps words only in caps: none of them is known
+    assert not {"louis", "secret", "top", "cia", "xiv"} & set(words["known"])
+    assert words["headings"] == ["Chapter I. The Arrival", "Chapter II. Father"]
     # the chapter text itself is unchanged
-    assert "Louis XIV knew." in (tmp_path / "out/001.txt").read_text()
+    assert "Louis XIV knew the chapter" in (tmp_path / "out/001.txt").read_text()

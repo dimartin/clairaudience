@@ -8,7 +8,9 @@ import normalise as N
 
 # a slice of what Monte Cristo writes in lowercase somewhere (it has all of these)
 KNOWN = {"volume", "one", "myself", "chapter", "secret", "top", "files", "the", "louis", "no", "ok"}
-WORDS = {"known": KNOWN, "title_numerals": {"I", "II", "III", "XIII", "XIV", "XV"}}
+WORDS = {"known": KNOWN, "title_numerals": {"I", "II", "III", "XIII", "XIV", "XV"},
+         "headings": {"XIV. The Return", "XIV", "XIV—The Return", "I. Marseilles", "Book II, Chapter IX",
+                      "IX. Alone"}}
 
 
 @pytest.mark.parametrize("roman, value", [("I", 1), ("IV", 4), ("XIV", 14), ("XVIII", 18), ("MDCCCXV", 1815),
@@ -35,7 +37,18 @@ def test_a_lone_title_I_is_not_a_number():
 
 def test_known_words_are_the_ones_written_in_lowercase():
     assert N.known_words(["VOLUME ONE\n\nThe first volume. He said NOTHING. Nothing."]) == \
-        {"the", "first", "volume", "he", "said", "nothing"}
+        {"first", "volume", "said"}
+
+
+def test_a_capitalised_word_is_not_evidence():
+    # a sentence-initial "It" or a name is not a lowercase occurrence; "iPhone" is
+    assert N.known_words(["It was Louis. Dantès went."]) == {"was", "went"}
+    assert N.known_words(["Us. We saw it. An iPhone."]) == {"saw", "it", "iphone"}
+
+
+def test_it_seen_only_capitalised_is_spelled_out():
+    words = {"known": N.known_words(["It was Louis. Us too."]), "title_numerals": set(), "headings": set()}
+    assert N.normalise("the IT team", words) == "the I. T. team"
 
 
 @pytest.mark.parametrize("text, said", [
@@ -46,6 +59,15 @@ def test_known_words_are_the_ones_written_in_lowercase():
     ("domum,” continued Louis XVIII., still annotating.", "domum,” continued Louis XVIII., still annotating."),
     ("after Cromwell, Charles II., and then James II.", "after Cromwell, Charles II., and then James II."),
     ("a lone DIX", "a lone DIX"),
+    ("Louis XIV", "Louis XIV"),
+    # a chapter word only as a heading writes it, at the start of the text
+    ("Before I act I must wait.", "Before I act I must wait."),
+    ("the part I played", "the part I played"),
+    ("part I played in it", "part I played in it"),            # lowercase at the start: still prose
+    ("act I must, he said", "act I must, he said"),
+    ("He read Book II twice.", "He read Book II twice."),       # not at the start
+    ("Chapter I and II", "Chapter one and II"),                 # only the numeral after the chapter word
+    ("“Chapter IV,” he said", "“Chapter four,” he said"),
     # caps words: Monte Cristo's own
     ("VOLUME ONE", "VOLUME ONE"),
     ("I will do it MYSELF!", "I will do it MYSELF!"),
@@ -76,6 +98,11 @@ def test_normalise(text, said):
     ("I—I—die—I——", True, "I—I—die—I——"),            # Monte Cristo, ch. 17: a stammer, not a heading
     ("I went home.", True, "I went home."),
     ("IX. Alone", True, "IX. Alone"),                 # IX isn't one of the book's title numerals
+    ("I. Marseilles", True, "one. Marseilles"),       # one of the book's headings
+    ("I. Smith", True, "I. Smith"),                   # heading-shaped narration, not a heading
+    ("I. said nothing", True, "I. said nothing"),
+    ("II—the end", True, "II—the end"),
+    ("XIV. The Return, he said, was late.", True, "XIV. The Return, he said, was late."),
 ])
 def test_heading_numerals_only_open_a_paragraph(text, opens, said):
     assert N.normalise(text, WORDS, opens_paragraph=opens) == said
@@ -87,7 +114,18 @@ def test_no_words_means_no_change():
 
 def test_load_builds_and_saves_words_json_when_missing(tmp_path):
     path = tmp_path / "words.json"
-    words = N.load(path, ["The SECRET is out."], ["Chapter I", "Chapter II"])
-    assert words == {"known": {"the", "is", "out"}, "title_numerals": {"I", "II"}}
+    words = N.load(path, ["The SECRET is out."], ["Chapter I", "Chapter  II"])
+    assert words == {"known": {"is", "out"}, "title_numerals": {"I", "II"}, "headings": {"Chapter I", "Chapter II"}}
     assert json.loads(path.read_text())["title_numerals"] == ["I", "II"]
     assert N.load(path) == words
+
+
+def test_heading_is_decided_from_the_text_unless_given():
+    assert N.normalise("XIV. The Return", WORDS, True, heading=False) == "XIV. The Return"
+    assert N.normalise("XIV. Cad-roose", WORDS, True, heading=True) == "fourteen. Cad-roose"
+
+
+def test_an_older_words_json_without_headings_uses_the_ones_given(tmp_path):
+    path = tmp_path / "words.json"
+    path.write_text(json.dumps({"known": ["the"], "title_numerals": ["I", "II"]}))
+    assert N.load(path, [], ["II.  Father"])["headings"] == {"II. Father"}

@@ -179,10 +179,12 @@ def load_lexicon(path=Path("pronunciations.json")):
 
 
 def speakable(text, lexicon, words=None, opens_paragraph=False):
-    """What the TTS reads: respellings first, then numerals and caps (normalise.py)."""
+    """What the TTS reads: respellings first, then numerals and caps (normalise.py). Whether
+    text is a heading is decided on the book's text, before the respellings."""
+    heading = normalise.is_heading(text, words)
     for pat, rep in lexicon:
         text = pat.sub(rep, text)
-    return normalise.normalise(text, words, opens_paragraph)
+    return normalise.normalise(text, words, opens_paragraph, heading)
 
 
 def load_words(book):
