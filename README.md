@@ -109,6 +109,25 @@ It voices every option in the narrator's voice and transcribes each clip with Wh
 
 Roman numerals and all-caps words are also rewritten for the TTS only (`normalise.py`), using the book as its own lexicon. `extract` saves `words.json` beside the chapters: every word the book writes lowercase-initial somewhere (a word seen only capitalised, like a sentence-initial "It", or only in caps doesn't count), the roman numerals its headings count with, and the headings themselves. The headings are the h1–h3 headings of the documents extract keeps as chapters, those with an h1–h3 starting "Chapter "; a document without one is not extracted, and its headings are not recorded. "Chapter XIV" is read as "Chapter fourteen" when the chapter word is written as a heading writes it ("Chapter", "CHAPTER") and starts the text or sits in a heading; only the numeral right after it converts. A paragraph that is one of those recorded headings and opens with one of its title numerals is read as the number: in a book whose kept chapters have headings "XIII. The Storm" and "XIV. The Return" (each beside a "Chapter …" heading), XIII and XIV are title numerals, so "XIV. The Return" reads as "fourteen. The Return"; a numeral with no neighbour in the book stays as written. A book whose headings are only "XIV. The Return", with no "Chapter", produces no chapters, so this rule never reaches it. Prose is never touched: "Louis XIV", "the part I played" and a paragraph opening "I. Smith" stay as written. An all-caps token the book also writes in lowercase stays a word, whatever its length ("NO", "VOLUME ONE", "MYSELF"). Any other is spelled out ("CIA" becomes "C. I. A.") when it is short and outside an all-caps passage, or when it can't be said as a word ("HTML"). A book extracted before this gets `words.json` built from its chapters at render time.
 
+## Line checks (QC)
+
+Render keeps every line as its own clip in `out/<book>/lines/NNN/`, with an `index.json` (the text sent to the TTS, the voice, the seed, and the profile and speech model that rendered the chapter). The `qc` stage runs after `render` and checks each clip:
+
+- **Words:** Whisper's transcript against the line: character error rate, the longest run of wrong words, extra speech before or after, and missing words of 5 letters or more, each confirmed by a second listen to a short window around it.
+- **Voice:** semitones between the clip's median pitch and the voice's reference clip.
+- **Length:** seconds per character against the voice's median.
+
+A clip fails a check when it is over `max(floor, k × that voice's median)`, set in `[qc]` in `config.toml`, so the bar is relative to the book. Flagged lines are rendered again with new seeds, by the speech model recorded in `index.json`, so retakes never mix models. Lines of 80 characters or fewer get 8 takes and keep the take closest to the reference pitch among those that pass every check; otherwise the best take wins, the current one included. When every take is heard the same wrong way, the report blames the recognizer and lists misheard names as `pronunciations.json` candidates. `out/<book>/qc/NNN.md` lists the flagged lines with reasons and before/after scores; listen to those.
+
+```bash
+.venv/bin/python clairaudience.py run books/<book>.epub --profile 16gb-small --only qc --chapters 4
+.venv/bin/python qc.py out/<book> 4      # the same; with no chapters, every rendered one
+```
+
+A chapter rendered before `index.json` recorded the speech model is retaken with `--profile`, `CLAIRAUDIENCE_PROFILE` or the default profile, and qc logs a warning; pass the profile that rendered it.
+
+Thresholds come from the clips checked in that run, so check the whole book for book-relative thresholds.
+
 ## Tests
 
 The unit tests cover the code that decides identity: cast merging and the dialogue-tag override. They need only `pytest`, and no model is loaded.

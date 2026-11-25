@@ -36,7 +36,8 @@ def load_config(profile=None):
     if local.exists():
         raw = _merge(raw, tomllib.loads(local.read_text()))
     name = profile or os.environ.get("CLAIRAUDIENCE_PROFILE") or raw.get("default_profile")
-    cfg = {**raw.get("llm", {}), **raw["profiles"][name], "profile": name, "publish": raw.get("publish", {})}
+    cfg = {**raw.get("llm", {}), **raw["profiles"][name], "profile": name, "publish": raw.get("publish", {}),
+           "qc": raw.get("qc", {})}
     if cfg.get("llm_api_key_file"):
         cfg["api_key"] = Path(cfg["llm_api_key_file"]).expanduser().read_text().strip()
     return cfg

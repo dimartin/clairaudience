@@ -1,4 +1,4 @@
-"""render.collect / long_enough. Needs mlx-audio (Apple Silicon); skipped elsewhere."""
+"""render.collect / long_enough / assemble / render_chapter. Needs mlx-audio (Apple Silicon); skipped elsewhere."""
 
 from types import SimpleNamespace
 
@@ -40,3 +40,33 @@ def test_speakable_respells_then_normalises():
     assert render.speakable("II. Caderousse", lexicon, words, opens_paragraph=True) == "two. Cad-roose"
     assert render.speakable("I. Smith", lexicon, words, opens_paragraph=True) == "I. Smith"
     assert render.speakable("the CIA", lexicon) == "the CIA"   # no words.json: respellings only
+
+
+def test_assemble_joins_clips_in_index_order_with_pauses(tmp_path):
+    sr = 24000
+    clips = [{"file": "0-0.wav", "para": 0, "voice": "narrator"}, {"file": "1-0.wav", "para": 0, "voice": "narrator"},
+             {"file": "2-0.wav", "para": 1, "voice": "danglars"}]
+    for c in clips:
+        render.audio_write(str(tmp_path / c["file"]), np.full(sr, 0.1, dtype=np.float32), sr)
+    (tmp_path / "index.json").write_text(render.json.dumps({"chapter": 1, "clips": clips}))
+    render.assemble(tmp_path, tmp_path / "001.wav")
+    audio, got_sr = render.audio_read(str(tmp_path / "001.wav"), dtype="float32")
+    want = 3 + render.PAUSE_SAME_PARA + max(render.PAUSE_NEW_PARA, render.PAUSE_SPEAKER)
+    assert abs(len(audio) / got_sr - want) < 0.01
+
+
+def test_seed_for_is_fixed_per_line_and_changes_per_take():
+    assert render.seed_for(12, 0) == render.seed_for(12, 0)
+    assert len({render.seed_for(12, 0, k) for k in range(8)}) == 8
+
+
+def test_render_chapter_records_the_profile_and_speech_model(tmp_path):
+    tts = SimpleNamespace(kind="chatterbox", profile="16gb-small", model_id="mlx-community/chatterbox-turbo-4bit",
+                          voices={"narrator": {}},
+                          speak=lambda text, vid, seed: (np.full(24000, 0.1, dtype=np.float32), 24000))
+    script = {"chapter": 4, "segments": [{"id": 0, "kind": "narration", "speaker": None, "para": 0, "text": "Hi."}]}
+    (tmp_path / "audio").mkdir()
+    render.render_chapter(tts, script, {}, [], tmp_path / "audio" / "004.wav")
+    idx = render.json.loads((tmp_path / "lines" / "004" / "index.json").read_text())
+    assert (idx["profile"], idx["tts"], idx["tts_model"]) == ("16gb-small", "chatterbox",
+                                                              "mlx-community/chatterbox-turbo-4bit")

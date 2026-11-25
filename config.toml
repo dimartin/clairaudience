@@ -50,3 +50,22 @@ dest = ""
 format = "m4a"          # m4a (per chapter), mp3 (per chapter), or m4b (one file with chapters)
 bitrate = "96k"
 label = "Full Cast"     # album name is "<Title> (<label>)"
+
+[qc]
+# qc.py: a clip fails a metric over max(floor, k x its voice's median for that metric).
+asr_model = "small.en"  # faster-whisper, as names.py uses
+cer_floor = 0.15        # character error rate of the transcript
+cer_k = 3.0
+wrong_run_floor = 3     # longest run of wrong words
+wrong_run_k = 3.0
+extra_floor = 2         # words heard before or after the line
+extra_k = 3.0
+pitch_floor = 4.0       # semitones from the voice's reference clip
+pitch_k = 3.0
+length_floor = 0.5      # |ln(seconds per char / the voice's median)|; 0.5 is about 1.65x
+length_k = 3.0
+min_missing_letters = 5 # shorter missing words are ignored: the recognizer drops them in good audio too
+window_pad = 0.6        # seconds either side of a missing word for the second listen
+retakes = 3             # new takes for a flagged line
+short_chars = 80        # a flagged line this short gets short_takes takes, keeping the closest pitch among passing takes
+short_takes = 8
