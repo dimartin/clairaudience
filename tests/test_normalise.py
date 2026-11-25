@@ -129,3 +129,13 @@ def test_an_older_words_json_without_headings_uses_the_ones_given(tmp_path):
     path = tmp_path / "words.json"
     path.write_text(json.dumps({"known": ["the"], "title_numerals": ["I", "II"]}))
     assert N.load(path, [], ["II.  Father"])["headings"] == {"II. Father"}
+
+
+def test_speakable_keeps_a_respellings_capitalised_stress():
+    import re
+    lexicon = [(re.compile(r"\bMercédès\b"), "MER-say-deez"), (re.compile(r"\bCaderousse\b"), "Cad-roose")]
+    assert N.speakable("Mercédès and the CIA", lexicon, WORDS) == "MER-say-deez and the C. I. A."
+    # the heading is decided on the book's text, before the respelling changes it
+    words = {**WORDS, "headings": WORDS["headings"] | {"II. Caderousse"}}
+    assert N.speakable("II. Caderousse", lexicon, words, opens_paragraph=True) == "two. Cad-roose"
+    assert N.speakable("the CIA", lexicon) == "the CIA"   # no words.json: respellings only

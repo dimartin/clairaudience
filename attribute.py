@@ -2,7 +2,7 @@
 
 The LLM labels quotes; then a deterministic pass overrides any quote whose dialogue tag
 ("said Danglars", "resumed the Catalan") names a cast member. A nameless tag ("said she",
-"his father replied") is asked about twice, blind; the speaker is set only when both
+"said his father") is asked about twice, blind; the speaker is set only when both
 answers agree. The book text is unchanged.
 
 Every quote records how its speaker was decided, in "source" (narration has none):
@@ -10,7 +10,8 @@ Every quote records how its speaker was decided, in "source" (narration has none
   tag-resolved  a nameless tag ("said she") resolved by two agreeing reads
   llm           the model's label, with no override
   unknown       the model gave no usable speaker (none, or a name not in the cast)
-  user          edited by hand; a rerun keeps these lines as they are
+  user          edited by hand; a rerun keeps the edit while the quote text is unchanged,
+                and drops it with a warning when the text has changed
 
 Usage: python attribute.py out/<book> [chapter ...]
 Writes out/<book>/NNN.script.json per chapter.
