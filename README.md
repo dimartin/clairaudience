@@ -14,7 +14,7 @@ The book's text is never changed. The pipeline only decides **who** speaks each 
 |---|---|---|---|
 | 1 | extract | none | splits the EPUB into chapters in reading order |
 | 2 | cast | LLM | reads the book chapter by chapter and builds the cast: names, aliases and disguises, plus evidence of voice and manner quoted from the text. Then it writes a whole-book persona per character |
-| 3 | attribute | LLM | labels every quoted line with its speaker and an emotion. A dialogue tag ("said Danglars") always overrides the model |
+| 3 | attribute | LLM | labels every quoted line with its speaker and an emotion. A dialogue tag ("said Danglars") always overrides the model. A nameless tag ("said she") is asked about twice, blind, and sets the speaker only when both answers agree |
 | 4 | voices | LLM | writes a voice-design brief for each main character from their persona, and picks a reference line from their own dialogue. Minor characters share a few extras' voices |
 | 5 | design | voice-design TTS | creates each voice from its text description and speaks the reference line |
 | 6 | render | cloning TTS | voices every line by cloning the reference clips. Joins are levelled and faded |
@@ -90,7 +90,7 @@ Every quote in `NNN.script.json` has a `source` that says how its speaker was de
 | `source` | Meaning |
 |---|---|
 | `tag` | a dialogue tag names a cast member ("said Danglars") |
-| `tag-resolved` | a nameless tag ("said she") resolved by two agreeing reads |
+| `tag-resolved` | a nameless tag ("said she", "said his father") resolved by two agreeing reads: the profile's text model, then `tag_check_model` if the profile sets one or the same model with another seed |
 | `llm` | the model's label, with nothing to confirm it |
 | `unknown` | the model gave no usable speaker (none, or a name not in the cast) |
 | `user` | edited by hand |
