@@ -34,6 +34,7 @@ STAGES = [
     ("voices", "llm", lambda b, epub, ch: ["voices.py", b]),
     ("design", "audio", lambda b, epub, ch: ["render.py", "design", b]),
     ("render", "audio", lambda b, epub, ch: ["render.py", "render", b, *ch]),
+    ("qc", "audio", lambda b, epub, ch: ["qc.py", b, *ch]),
     ("encode", None, lambda b, epub, ch: ["encode.py", "encode", b]),
     ("publish", None, lambda b, epub, ch: ["encode.py", "publish", b]),
 ]

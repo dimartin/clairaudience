@@ -3,7 +3,9 @@
 design: the voice-design model speaks each voice's reference line from its description
         -> <book>/refs/<id>.wav
 render: the TTS model clones each reference and voices every segment of each chapter
-        script -> <book>/audio/NNN.wav. Narration goes to the narrator voice.
+        script -> <book>/audio/NNN.wav. Narration goes to the narrator voice. Every chunk
+        is also kept as <book>/lines/NNN/<seg>-<n>.wav, listed in lines/NNN/index.json
+        (text sent to the TTS, voice, seed), so qc.py can check and retake single lines.
 
 Usage: python render.py design out/<book>
        python render.py render out/<book> [chapter ...]
@@ -143,7 +145,10 @@ class TTS:
         else:
             self.model = load_model(cfg["tts_model"])
 
-    def speak(self, text, vid):
+    def speak(self, text, vid, seed=None):
+        if seed is not None:
+            import mlx.core as mx
+            mx.random.seed(seed)
         if self.kind == "higgs":
             return collect(self.model.generate(text=text, ref_audio_codes=self.codes[vid],
                                                ref_text=self.voices[vid]["text"], temperature=1.0,
@@ -195,8 +200,31 @@ def load_words(book):
     return normalise.load(book / "words.json", texts, headings)
 
 
+def seed_for(seg, n, take=0):
+    """A fixed seed per line, so a clip can be rendered again; a retake changes it."""
+    return seg * 100 + n + 7919 * take
+
+
+def assemble(lines_dir, out_path):
+    """Join a chapter's line clips, in index order, with the pauses between them."""
+    index = json.loads((lines_dir / "index.json").read_text())
+    pieces, sr, prev = [], 24000, None
+    for c in index["clips"]:
+        audio, sr = audio_read(str(lines_dir / c["file"]), dtype="float32")
+        if prev is not None:
+            gap = PAUSE_NEW_PARA if c["para"] != prev["para"] else PAUSE_SAME_PARA
+            if c["voice"] != prev["voice"]:
+                gap = max(gap, PAUSE_SPEAKER)
+            pieces.append(np.zeros(int(gap * sr), dtype=np.float32))
+        pieces.append(np.asarray(audio, dtype=np.float32).reshape(-1))
+        prev = c
+    audio_write(str(out_path), limit(np.concatenate(pieces)), sr)
+
+
 def render_chapter(tts, script, voice_map, lexicon, out_path, words=None):
-    pieces, sr, prev_para, prev_vid = [], 24000, None, None
+    lines_dir = out_path.parent.parent / "lines" / out_path.stem
+    lines_dir.mkdir(parents=True, exist_ok=True)
+    clips = []
     t_start, audio_secs = time.time(), 0.0
     segs = script["segments"]
     for i, s in enumerate(segs):
@@ -204,22 +232,22 @@ def render_chapter(tts, script, voice_map, lexicon, out_path, words=None):
         if vid not in tts.voices:
             vid = "narrator"
         para_start = s["kind"] == "narration" and (i == 0 or segs[i - 1]["para"] != s["para"])
-        for j, chunk in enumerate(split(s["text"])):
-            audio, sr = tts.speak(speakable(chunk, lexicon, words, para_start and j == 0), vid)
-            if prev_para is not None:
-                gap = PAUSE_NEW_PARA if s["para"] != prev_para else PAUSE_SAME_PARA
-                if vid != prev_vid:
-                    gap = max(gap, PAUSE_SPEAKER)
-                pieces.append(np.zeros(int(gap * sr), dtype=np.float32))
+        for n, chunk in enumerate(split(s["text"])):
+            spoken, seed = speakable(chunk, lexicon, words, para_start and n == 0), seed_for(s["id"], n)
+            audio, sr = tts.speak(spoken, vid, seed)
             audio = tidy(audio, sr)
-            pieces.append(audio)
+            name = f"{s['id']}-{n}.wav"
+            audio_write(str(lines_dir / name), audio, sr)
+            clips.append({"seg": s["id"], "n": n, "file": name, "kind": s["kind"], "para": s["para"],
+                          "voice": vid, "text": chunk, "spoken": spoken, "seed": seed})
             audio_secs += len(audio) / sr
-            prev_para, prev_vid = s["para"], vid
         if i % 25 == 0:
             el = time.time() - t_start
             log.info("ch%s seg %d/%d, %.0fs audio in %.0fs (RTF %.2f)", script["chapter"], i, len(segs),
                      audio_secs, el, el / max(audio_secs, 1))
-    audio_write(str(out_path), limit(np.concatenate(pieces)), sr)
+    (lines_dir / "index.json").write_text(json.dumps({"chapter": script["chapter"], "clips": clips}, indent=1,
+                                                     ensure_ascii=False))
+    assemble(lines_dir, out_path)
     el = time.time() - t_start
     log.info("wrote %s: %.0fs audio in %.0fs (RTF %.2f)", out_path, audio_secs, el, el / max(audio_secs, 1))
 
